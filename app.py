@@ -11,7 +11,7 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(24))
 DATABASE = "scheduler.db"
 
 def get_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -35,11 +35,9 @@ def check_password(stored_hash: str, password: str) -> bool:
         return False
 
 def init_db():
+    """Initializes the database schema cleanly on app startup."""
     with get_db() as conn:
-        # 1. Force drop any conflicting or incomplete user tables to avoid structural mismatch
-        conn.execute('DROP TABLE IF EXISTS user_profile')
-        
-        # 2. Build the correct secure identity structure
+        # USER TABLE
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_profile (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,9 +47,10 @@ def init_db():
                 wake_time TEXT NOT NULL,
                 email TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL
-            )''')
+            )
+        ''')
 
-        # Tasks Table
+        # TASKS TABLE
         conn.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,53 +60,39 @@ def init_db():
                 urgency INTEGER CHECK(urgency BETWEEN 1 AND 5),
                 difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 5),
                 duration INTEGER NOT NULL,
-                is_completed INTEGER DEFAULT 0,
-                FOREIGN KEY(parent_id) REFERENCES tasks(id)
-            )''')
-        
-        # Commitments Table
+                is_completed INTEGER DEFAULT 0
+            )
+        ''')
+
+        # COMMITMENTS TABLE
         conn.execute('''
             CREATE TABLE IF NOT EXISTS commitments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
                 start_time TEXT NOT NULL,
                 end_time TEXT NOT NULL
-            )''')
-        
-        # Energy Matrix Table
+            )
+        ''')
+
+        # ENERGY TABLE
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_energy (
                 hour INTEGER PRIMARY KEY,
                 energy_level INTEGER CHECK(energy_level BETWEEN 1 AND 5)
-            )''')
-        
-        if not conn.execute("SELECT 1 FROM user_energy").fetchone():
-            default_profile = [(h, 5 if 8 <= h <= 12 else (2 if 13 <= h <= 16 else 3)) for h in range(0, 24)]
-            conn.executemany("INSERT INTO user_energy (hour, energy_level) VALUES (?, ?)", default_profile)
-        conn.commit()
-        
-        # Energy Matrix Table
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS user_energy (
-                hour INTEGER PRIMARY KEY,
-                energy_level INTEGER CHECK(energy_level BETWEEN 1 AND 5)
-            )''')
-        
-        # UPDATED: User Profile Table with Security Columns
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS user_profile (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                age INTEGER,
-                occupation TEXT,
-                wake_time TEXT NOT NULL,
-                email TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL
-            )''')
-        
-        if not conn.execute("SELECT 1 FROM user_energy").fetchone():
-            default_profile = [(h, 5 if 8 <= h <= 12 else (2 if 13 <= h <= 16 else 3)) for h in range(0, 24)]
-            conn.executemany("INSERT INTO user_energy (hour, energy_level) VALUES (?, ?)", default_profile)
+            )
+        ''')
+
+        # Seed energy levels if empty
+        if not conn.execute("SELECT 1 FROM user_energy LIMIT 1").fetchone():
+            default_profile = [
+                (h, 5 if 8 <= h <= 12 else (2 if 13 <= h <= 16 else 3))
+                for h in range(0, 24)
+            ]
+            conn.executemany(
+                "INSERT INTO user_energy (hour, energy_level) VALUES (?, ?)",
+                default_profile
+            )
+
         conn.commit()
 
 def run_scheduling_engine():
@@ -246,7 +231,7 @@ def login():
             flash("Authentication successful!", "success")
             return redirect(url_for('index'))
         else:
-            flash("Invalid cryptographic credentials.", "danger")
+            flash("Invalid credentials.", "danger")
             
     return render_template('login.html')
 
@@ -261,7 +246,6 @@ def signup():
         password = request.form['password']
         
         db = get_db()
-        # Enforce unique email check
         existing = db.execute("SELECT 1 FROM user_profile WHERE email = ?", (email,)).fetchone()
         if existing:
             flash("Email identity is already registered.", "danger")
@@ -345,8 +329,9 @@ def clear_commitments():
     db.commit()
     return redirect(url_for('manage_commitments'))
 
+# Force database init immediately upon file loading (handles Gunicorn execution)
 init_db()
-if __name__ == '__main__':
 
+if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

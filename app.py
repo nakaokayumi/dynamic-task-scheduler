@@ -208,7 +208,7 @@ def is_authenticated():
 @app.route('/')
 def index():
     if not is_authenticated():
-        return redirect(url_for('login'))
+        return redirect(url_for('signup'))
     db = get_db()
     profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (session['user_id'],)).fetchone()
     timeline = run_scheduling_engine()

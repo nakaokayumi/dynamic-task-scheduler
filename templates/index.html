@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="space-y-6">
+    <header class="flex flex-col md:flex-row md:justify-between md:items-center bg-slate-950 border border-slate-800 p-6 rounded-2xl shadow-lg">
+        <div>
+            <h1 class="text-3xl font-extrabold tracking-tight">Welcome back, {{ profile.name }} ⚡</h1>
+            <p class="text-slate-400 text-sm mt-1">Operational Role: <span class="text-sky-400 font-medium">{{ profile.occupation }}</span> (Age: {{ profile.age }})</p>
+        </div>
+        <div class="text-left md:text-right mt-4 md:mt-0 bg-slate-900 border border-slate-800/60 px-4 py-2 rounded-xl">
+            <span class="text-xs text-slate-500 block">Daily System Start Anchor</span>
+            <span class="text-md font-mono text-emerald-400 font-bold">Waking up at {{ profile.wake_time }}</span>
+        </div>
+    </header>
+
+    <div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xl">
+        <h2 class="text-lg font-bold border-b border-slate-800 pb-3 mb-6 text-slate-300">Live Timeline Matrix</h2>
+        
+        {% if not timeline %}
+        <div class="text-center py-12 text-slate-500 text-sm">No items scheduled yet. Add tasks or commitments to run engine calculations.</div>
+        {% else %}
+        <div class="relative border-l-2 border-slate-800 ml-4 space-y-6">
+            {% for item in timeline %}
+            <div class="relative pl-8">
+                <span class="absolute left-[-9px] top-1.5 w-4 h-4 rounded-full border-2 {{ 'bg-amber-500 border-amber-900' if item.type == 'commitment' else 'bg-sky-500 border-sky-900' }}"></span>
+                <div class="p-4 rounded-xl border {{ 'bg-amber-950/20 border-amber-800/60' if item.type == 'commitment' else 'bg-slate-900 border-slate-800' }} flex justify-between items-center shadow-md">
+                    <div>
+                        <span class="text-xs font-mono {{ 'text-amber-400' if item.type == 'commitment' else 'text-sky-400' }} font-bold">[{{ item.start }} - {{ item.end }}]</span>
+                        <h3 class="text-md font-semibold text-white mt-1">{{ item.title }}</h3>
+                        <p class="text-xs text-slate-400 mt-0.5 capitalize">{{ item.type }} Block</p>
+                    </div>
+                    {% if item.type == 'task' %}
+                    <div class="text-right">
+                        <span class="text-xs text-slate-500 block">Engine Match Score</span>
+                        <span class="text-md font-mono text-emerald-400 font-bold">{{ item.score }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

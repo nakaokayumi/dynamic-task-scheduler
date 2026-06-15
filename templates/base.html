@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matrix Scheduler</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex flex-col">
+    <nav class="bg-slate-950 border-b border-slate-800 px-6 py-4 flex justify-between items-center shadow-lg">
+        <span class="text-xl font-bold text-sky-400 tracking-wider">⚡ Matrix Scheduler</span>
+        <div class="space-x-4 text-sm">
+            <a href="{{ url_for('index') }}" class="text-slate-300 hover:text-sky-400 font-medium transition">Dashboard</a>
+            <a href="{{ url_for('manage_tasks') }}" class="text-slate-300 hover:text-sky-400 font-medium transition">Tasks Queue</a>
+            <a href="{{ url_for('manage_commitments') }}" class="text-slate-300 hover:text-sky-400 font-medium transition">Fixed Commitments</a>
+            <a href="{{ url_for('manage_energy') }}" class="text-slate-300 hover:text-purple-400 font-medium transition">⚡ Energy Profile</a>
+            <a href="{{ url_for('signup') }}" class="text-slate-400 hover:text-white font-medium transition border-l border-slate-700 pl-4">👤 Profile Settings</a>
+        </div>
+    </nav>
+    <main class="flex-grow p-6 md:p-10 max-w-7xl w-full mx-auto">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

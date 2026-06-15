@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div class="bg-slate-950 border border-slate-800 p-6 rounded-2xl shadow-xl h-fit">
+        <h2 class="text-xl font-bold text-white mb-4">Lock Blocker Anchor</h2>
+        <form method="POST" class="space-y-4 text-sm">
+            <div>
+                <label class="block text-slate-400 mb-1">Anchor Event Name</label>
+                <input type="text" name="title" placeholder="e.g. Lectures" required class="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-white focus:outline-none focus:border-sky-500">
+            </div>
+            <div>
+                <label class="block text-slate-400 mb-1">Start Timeline Anchor</label>
+                <input type="datetime-local" name="start_time" required class="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-300 focus:outline-none focus:border-sky-500">
+            </div>
+            <div>
+                <label class="block text-slate-400 mb-1">End Timeline Anchor</label>
+                <input type="datetime-local" name="end_time" required class="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-300 focus:outline-none focus:border-sky-500">
+            </div>
+            <button type="submit" class="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold py-2 rounded-lg mt-2 transition cursor-pointer">Establish Boundary</button>
+        </form>
+    </div>
+
+    <div class="lg:col-span-2 bg-slate-950 border border-slate-800 p-6 rounded-2xl shadow-xl">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold text-white">Fixed Day Constraints</h2>
+            {% if commitments %}
+            <a href="{{ url_for('clear_commitments') }}" class="text-xs text-rose-400 hover:underline">Wipe Constraints Calendar</a>
+            {% endif %}
+        </div>
+        <div class="space-y-3">
+            {% if not commitments %}
+            <p class="text-slate-500 text-center py-6 text-sm">No external system time boundaries established for today.</p>
+            {% endif %}
+            {% for comm in commitments %}
+            <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl flex justify-between items-center">
+                <div>
+                    <h3 class="text-md font-semibold text-white">{{ comm.title }}</h3>
+                    <p class="text-xs font-mono text-amber-400 mt-1">Anchor Span: {{ comm.start_time }} to {{ comm.end_time }}</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

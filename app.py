@@ -3,10 +3,9 @@ import sqlite3
 import hashlib
 import secrets
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 
 app = Flask(__name__)
-# Secure secret key generation for handling session cookies securely
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(24))
 DATABASE = "scheduler.db"
 
@@ -49,21 +48,22 @@ def init_db():
             )
         ''')
 
-        # TEMP RESET PATCH: Drops old task schema to apply new due_date column
+        # RESET PATCH: Clean wipe to handle due_date and parent_id schemas perfectly
         conn.execute('DROP TABLE IF EXISTS tasks')
 
-        # TASKS TABLE (Updated with due_date column)
+        # TASKS TABLE (Equipped with parent_id for dependencies)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                parent_id INTEGER,
+                parent_id INTEGER DEFAULT NULL,
                 title TEXT NOT NULL,
                 priority INTEGER CHECK(priority BETWEEN 1 AND 5),
                 urgency INTEGER CHECK(urgency BETWEEN 1 AND 5),
                 difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 5),
                 duration INTEGER NOT NULL,
                 due_date TEXT,
-                is_completed INTEGER DEFAULT 0
+                is_completed INTEGER DEFAULT 0,
+                FOREIGN KEY(parent_id) REFERENCES tasks(id) ON DELETE SET NULL
             )
         ''')
 
@@ -85,22 +85,24 @@ def init_db():
             )
         ''')
 
-        # Seed energy levels if empty
         if not conn.execute("SELECT 1 FROM user_energy LIMIT 1").fetchone():
             default_profile = [
                 (h, 5 if 8 <= h <= 12 else (2 if 13 <= h <= 16 else 3))
                 for h in range(0, 24)
             ]
-            conn.executemany(
-                "INSERT INTO user_energy (hour, energy_level) VALUES (?, ?)",
-                default_profile
-            )
-
+            conn.executemany("INSERT INTO user_energy (hour, energy_level) VALUES (?, ?)", default_profile)
         conn.commit()
 
 def run_scheduling_engine():
     db = get_db()
-    raw_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
+    
+    # ADVANCED FEATURE: Only pull tasks that either have no parent, or whose parent is already completed!
+    raw_tasks = db.execute('''
+        SELECT t.* FROM tasks t 
+        WHERE t.is_completed = 0 
+        AND (t.parent_id IS NULL OR t.parent_id IN (SELECT id FROM tasks WHERE is_completed = 1))
+    ''').fetchall()
+    
     tasks = [dict(t) for t in raw_tasks]
     commitments = db.execute("SELECT * FROM commitments ORDER BY start_time ASC").fetchall()
     
@@ -143,8 +145,7 @@ def run_scheduling_engine():
             
             scored_tasks = []
             for t in tasks:
-                # Calculate days remaining until due date
-                days_left = 7  # Default buffer if no due date is provided
+                days_left = 7
                 if t['due_date']:
                     try:
                         due_dt = datetime.strptime(t['due_date'], "%Y-%m-%d").date()
@@ -152,23 +153,14 @@ def run_scheduling_engine():
                     except Exception:
                         pass
 
-                # Prevent division by zero or negative days compounding incorrectly
-                if days_left <= 0:
-                    due_multiplier = 3.0  # High emergency scaling multiplier
-                elif days_left <= 1:
-                    due_multiplier = 2.0
-                elif days_left <= 3:
-                    due_multiplier = 1.5
-                elif days_left <= 7:
-                    due_multiplier = 1.2
-                else:
-                    due_multiplier = 1.0
+                if days_left <= 0: due_multiplier = 3.0
+                elif days_left <= 1: due_multiplier = 2.0
+                elif days_left <= 3: due_multiplier = 1.5
+                elif days_left <= 7: due_multiplier = 1.2
+                else: due_multiplier = 1.0
 
-                # --- ADVANCED MATH ENGINE: ALIGNING STRATEGIC FIT WITH TIME-TO-DUE ---
                 p_global = (0.6 * t['priority']) + (0.4 * t['urgency'])
                 dur_norm = t['duration'] / 480.0
-                
-                # Apply the due date multiplier directly to the core priority score
                 s_fit = (p_global * due_multiplier) - (0.1 * dur_norm)
                 
                 if t['difficulty'] > user_energy_input:
@@ -227,7 +219,6 @@ def run_scheduling_engine():
     schedule_timeline.sort(key=lambda x: x['start'])
     return schedule_timeline
 
-# --- AUTHENTICATION INTERCEPT HELPER ---
 def is_authenticated():
     return "user_id" in session
 
@@ -241,80 +232,97 @@ def index():
     timeline = run_scheduling_engine()
     return render_template('index.html', timeline=timeline, profile=profile)
 
+# CALENDAR DASHBOARD ROUTE VIEW
+@app.route('/calendar')
+def calendar_view():
+    if not is_authenticated():
+        return redirect(url_for('login'))
+    return render_template('calendar.html')
+
+# --- API ENDPOINT FOR FULLCALENDAR.JS FEED ---
+@app.route('/api/calendar-events')
+def calendar_events():
+    if not is_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    db = get_db()
+    events = []
+    
+    # Fetch commitments
+    commitments = db.execute("SELECT * FROM commitments").fetchall()
+    for c in commitments:
+        events.append({
+            "title": f"🔒 {c['title']}",
+            "start": c['start_time'],
+            "end": c['end_time'],
+            "backgroundColor": "#1e293b",
+            "borderColor": "#334155"
+        })
+        
+    # Fetch pending tasks mapped onto their targeted due dates
+    tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
+    for t in tasks:
+        if t['due_date']:
+            events.append({
+                "title": f"🎯 {t['title']}",
+                "start": t['due_date'],
+                "allDay": True,
+                "backgroundColor": "#7c3aed",
+                "borderColor": "#6d28d9"
+            })
+    return jsonify(events)
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if is_authenticated():
-        return redirect(url_for('index'))
-        
+    if is_authenticated(): return redirect(url_for('index'))
     if request.method == 'POST':
-        email = request.form['email']
-        password = request.form['password']
-        
         db = get_db()
-        user = db.execute("SELECT * FROM user_profile WHERE email = ?", (email,)).fetchone()
-        
-        if user and check_password(user['password_hash'], password):
+        user = db.execute("SELECT * FROM user_profile WHERE email = ?", (request.form['email'],)).fetchone()
+        if user and check_password(user['password_hash'], request.form['password']):
             session['user_id'] = user['id']
-            flash("Authentication successful!", "success")
             return redirect(url_for('index'))
-        else:
-            flash("Invalid credentials.", "danger")
-            
+        flash("Invalid credentials.", "danger")
     return render_template('login.html')
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     if request.method == 'POST':
-        name = request.form['name']
-        age = request.form['age']
-        occupation = request.form['occupation']
-        wake_time = request.form['wake_time']
-        email = request.form['email']
-        password = request.form['password']
-        
         db = get_db()
-        existing = db.execute("SELECT 1 FROM user_profile WHERE email = ?", (email,)).fetchone()
-        if existing:
-            flash("Email identity is already registered.", "danger")
+        if db.execute("SELECT 1 FROM user_profile WHERE email = ?", (request.form['email'],)).fetchone():
+            flash("Email registered.", "danger")
             return redirect(url_for('signup'))
-            
-        hashed_pw = hash_password(password)
-        
-        db.execute(
-            "INSERT INTO user_profile (name, age, occupation, wake_time, email, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
-            (name, age, occupation, wake_time, email, hashed_pw)
-        )
+        hashed_pw = hash_password(request.form['password'])
+        db.execute("INSERT INTO user_profile (name, age, occupation, wake_time, email, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
+                   (request.form['name'], request.form['age'], request.form['occupation'], request.form['wake_time'], request.form['email'], hashed_pw))
         db.commit()
-        flash("Account created! You can now authenticate.", "success")
         return redirect(url_for('login'))
-        
     return render_template('signup.html')
 
 @app.route('/logout')
 def logout():
     session.clear()
-    flash("Session terminated securely.", "success")
     return redirect(url_for('login'))
 
 @app.route('/tasks', methods=['GET', 'POST'])
 def manage_tasks():
-    if not is_authenticated():
-        return redirect(url_for('login'))
+    if not is_authenticated(): return redirect(url_for('login'))
     db = get_db()
     if request.method == 'POST':
+        parent = request.form.get('parent_id')
+        parent_val = int(parent) if parent and parent.strip() else None
         db.execute(
-            "INSERT INTO tasks (title, priority, urgency, difficulty, duration, due_date) VALUES (?, ?, ?, ?, ?, ?)",
-            (request.form['title'], request.form['priority'], request.form['urgency'], request.form['difficulty'], request.form['duration'], request.form['due_date'])
+            "INSERT INTO tasks (title, priority, urgency, difficulty, duration, due_date, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (request.form['title'], request.form['priority'], request.form['urgency'], request.form['difficulty'], request.form['duration'], request.form['due_date'], parent_val)
         )
         db.commit()
         return redirect(url_for('manage_tasks'))
+        
+    # Grab all tasks so the user can select dependencies from the list
     all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
     return render_template('tasks.html', tasks=all_tasks)
 
 @app.route('/commitments', methods=['GET', 'POST'])
 def manage_commitments():
-    if not is_authenticated():
-        return redirect(url_for('login'))
+    if not is_authenticated(): return redirect(url_for('login'))
     db = get_db()
     if request.method == 'POST':
         db.execute("INSERT INTO commitments (title, start_time, end_time) VALUES (?, ?, ?)",
@@ -326,15 +334,13 @@ def manage_commitments():
 
 @app.route('/energy', methods=['GET', 'POST'])
 def manage_energy():
-    if not is_authenticated():
-        return redirect(url_for('login'))
+    if not is_authenticated(): return redirect(url_for('login'))
     db = get_db()
     if request.method == 'POST':
         for hour in range(0, 24):
             field_name = f"energy_{hour}"
             if field_name in request.form:
-                level = request.form[field_name]
-                db.execute("UPDATE user_energy SET energy_level = ? WHERE hour = ?", (level, hour))
+                db.execute("UPDATE user_energy SET energy_level = ? WHERE hour = ?", (request.form[field_name], hour))
         db.commit()
         return redirect(url_for('index'))
     energy_levels = db.execute("SELECT * FROM user_energy ORDER BY hour ASC").fetchall()
@@ -342,8 +348,7 @@ def manage_energy():
 
 @app.route('/complete-task/<int:task_id>')
 def complete_task(task_id):
-    if not is_authenticated():
-        return redirect(url_for('login'))
+    if not is_authenticated(): return redirect(url_for('login'))
     db = get_db()
     db.execute("UPDATE tasks SET is_completed = 1 WHERE id = ?", (task_id,))
     db.commit()
@@ -351,49 +356,13 @@ def complete_task(task_id):
 
 @app.route('/clear-commitments')
 def clear_commitments():
-    if not is_authenticated():
-        return redirect(url_for('login'))
+    if not is_authenticated(): return redirect(url_for('login'))
     db = get_db()
     db.execute("DELETE FROM commitments")
     db.commit()
     return redirect(url_for('manage_commitments'))
 
-@app.route('/api/calendar-events')
-def calendar_events():
-    if not is_authenticated():
-        return {"error": "Unauthorized"}, 401
-        
-    db = get_db()
-    events = []
-    
-    # 1. Pull Rigid Commitments
-    commitments = db.execute("SELECT * FROM commitments").fetchall()
-    for c in commitments:
-        events.append({
-            "title": f"🔒 {c['title']}",
-            "start": c['start_time'], # e.g., "2026-06-16T12:00"
-            "end": c['end_time'],
-            "backgroundColor": "#1e293b", # Dark slate for commitments
-            "borderColor": "#334155"
-        })
-        
-    # 2. Pull Tasks with Due Dates
-    tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
-    for t in tasks:
-        if t['due_date']:
-            events.append({
-                "title": f"🎯 {t['title']} (Due)",
-                "start": t['due_date'], # e.g., "2026-06-16"
-                "allDay": True,
-                "backgroundColor": "#7c3aed", # Purple for tasks
-                "borderColor": "#6d28d9"
-            })
-            
-    return jsonify(events)
-
-# Force database init immediately upon file loading
 init_db()
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

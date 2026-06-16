@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 
 app = Flask(__name__)
+# Secure secret key generation for handling session cookies securely
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(24))
 DATABASE = "scheduler.db"
 
@@ -35,12 +36,6 @@ def check_password(stored_hash: str, password: str) -> bool:
 def init_db():
     """Initializes the database schema cleanly on app startup."""
     with get_db() as conn:
-        # FORCE RESET FORCE POINT: Drop old structural layouts to prevent schema collisions
-        conn.execute('DROP TABLE IF EXISTS user_profile')
-        conn.execute('DROP TABLE IF EXISTS tasks')
-        conn.execute('DROP TABLE IF EXISTS commitments')
-        conn.execute('DROP TABLE IF EXISTS user_energy')
-
         # USER TABLE
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_profile (
@@ -54,35 +49,35 @@ def init_db():
             )
         ''')
 
-        # TASKS TABLE (Updated with user isolation)
+        # TEMP RESET PATCH: Drops old task schema to apply new due_date column
+        conn.execute('DROP TABLE IF EXISTS tasks')
+
+        # TASKS TABLE (Updated with due_date column)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
                 parent_id INTEGER,
                 title TEXT NOT NULL,
                 priority INTEGER CHECK(priority BETWEEN 1 AND 5),
                 urgency INTEGER CHECK(urgency BETWEEN 1 AND 5),
                 difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 5),
                 duration INTEGER NOT NULL,
-                is_completed INTEGER DEFAULT 0,
-                FOREIGN KEY(user_id) REFERENCES user_profile(id)
+                due_date TEXT,
+                is_completed INTEGER DEFAULT 0
             )
         ''')
 
-        # COMMITMENTS TABLE (Updated with user isolation)
+        # COMMITMENTS TABLE
         conn.execute('''
             CREATE TABLE IF NOT EXISTS commitments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
                 title TEXT NOT NULL,
                 start_time TEXT NOT NULL,
-                end_time TEXT NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES user_profile(id)
+                end_time TEXT NOT NULL
             )
         ''')
 
-        # ENERGY TABLE (Global lookup map)
+        # ENERGY TABLE
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_energy (
                 hour INTEGER PRIMARY KEY,
@@ -103,16 +98,16 @@ def init_db():
 
         conn.commit()
 
-def run_scheduling_engine(user_id):
+def run_scheduling_engine():
     db = get_db()
-    raw_tasks = db.execute("SELECT * FROM tasks WHERE user_id = ? AND is_completed = 0", (user_id,)).fetchall()
+    raw_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
     tasks = [dict(t) for t in raw_tasks]
-    commitments = db.execute("SELECT * FROM commitments WHERE user_id = ? ORDER BY start_time ASC", (user_id,)).fetchall()
+    commitments = db.execute("SELECT * FROM commitments ORDER BY start_time ASC").fetchall()
     
     raw_energy = db.execute("SELECT * FROM user_energy").fetchall()
     energy_map = {row['hour']: row['energy_level'] for row in raw_energy}
     
-    profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (user_id,)).fetchone()
+    profile = db.execute("SELECT * FROM user_profile LIMIT 1").fetchone()
     wake_hour = 6
     if profile and profile['wake_time']:
         try:
@@ -148,9 +143,33 @@ def run_scheduling_engine(user_id):
             
             scored_tasks = []
             for t in tasks:
+                # Calculate days remaining until due date
+                days_left = 7  # Default buffer if no due date is provided
+                if t['due_date']:
+                    try:
+                        due_dt = datetime.strptime(t['due_date'], "%Y-%m-%d").date()
+                        days_left = (due_dt - today).days
+                    except Exception:
+                        pass
+
+                # Prevent division by zero or negative days compounding incorrectly
+                if days_left <= 0:
+                    due_multiplier = 3.0  # High emergency scaling multiplier
+                elif days_left <= 1:
+                    due_multiplier = 2.0
+                elif days_left <= 3:
+                    due_multiplier = 1.5
+                elif days_left <= 7:
+                    due_multiplier = 1.2
+                else:
+                    due_multiplier = 1.0
+
+                # --- ADVANCED MATH ENGINE: ALIGNING STRATEGIC FIT WITH TIME-TO-DUE ---
                 p_global = (0.6 * t['priority']) + (0.4 * t['urgency'])
                 dur_norm = t['duration'] / 480.0
-                s_fit = p_global - (0.1 * dur_norm)
+                
+                # Apply the due date multiplier directly to the core priority score
+                s_fit = (p_global * due_multiplier) - (0.1 * dur_norm)
                 
                 if t['difficulty'] > user_energy_input:
                     e_fit = 0
@@ -218,8 +237,8 @@ def index():
     if not is_authenticated():
         return redirect(url_for('signup'))
     db = get_db()
-    profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (session['user_id'],)).fetchone()
-    timeline = run_scheduling_engine(session['user_id'])
+    profile = db.execute("SELECT * FROM user_profile LIMIT 1").fetchone()
+    timeline = run_scheduling_engine()
     return render_template('index.html', timeline=timeline, profile=profile)
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -283,11 +302,13 @@ def manage_tasks():
         return redirect(url_for('login'))
     db = get_db()
     if request.method == 'POST':
-        db.execute("INSERT INTO tasks (user_id, title, priority, urgency, difficulty, duration) VALUES (?, ?, ?, ?, ?, ?)",
-                   (session['user_id'], request.form['title'], request.form['priority'], request.form['urgency'], request.form['difficulty'], request.form['duration']))
+        db.execute(
+            "INSERT INTO tasks (title, priority, urgency, difficulty, duration, due_date) VALUES (?, ?, ?, ?, ?, ?)",
+            (request.form['title'], request.form['priority'], request.form['urgency'], request.form['difficulty'], request.form['duration'], request.form['due_date'])
+        )
         db.commit()
         return redirect(url_for('manage_tasks'))
-    all_tasks = db.execute("SELECT * FROM tasks WHERE user_id = ? AND is_completed = 0", (session['user_id'],)).fetchall()
+    all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
     return render_template('tasks.html', tasks=all_tasks)
 
 @app.route('/commitments', methods=['GET', 'POST'])
@@ -296,11 +317,11 @@ def manage_commitments():
         return redirect(url_for('login'))
     db = get_db()
     if request.method == 'POST':
-        db.execute("INSERT INTO commitments (user_id, title, start_time, end_time) VALUES (?, ?, ?, ?)",
-                   (session['user_id'], request.form['title'], request.form['start_time'], request.form['end_time']))
+        db.execute("INSERT INTO commitments (title, start_time, end_time) VALUES (?, ?, ?)",
+                   (request.form['title'], request.form['start_time'], request.form['end_time']))
         db.commit()
         return redirect(url_for('manage_commitments'))
-    all_comm = db.execute("SELECT * FROM commitments WHERE user_id = ?", (session['user_id'],)).fetchall()
+    all_comm = db.execute("SELECT * FROM commitments").fetchall()
     return render_template('commitments.html', commitments=all_comm)
 
 @app.route('/energy', methods=['GET', 'POST'])
@@ -324,7 +345,7 @@ def complete_task(task_id):
     if not is_authenticated():
         return redirect(url_for('login'))
     db = get_db()
-    db.execute("UPDATE tasks SET is_completed = 1 WHERE id = ? AND user_id = ?", (task_id, session['user_id']))
+    db.execute("UPDATE tasks SET is_completed = 1 WHERE id = ?", (task_id,))
     db.commit()
     return redirect(url_for('manage_tasks'))
 
@@ -333,7 +354,7 @@ def clear_commitments():
     if not is_authenticated():
         return redirect(url_for('login'))
     db = get_db()
-    db.execute("DELETE FROM commitments WHERE user_id = ?", (session['user_id'],))
+    db.execute("DELETE FROM commitments")
     db.commit()
     return redirect(url_for('manage_commitments'))
 

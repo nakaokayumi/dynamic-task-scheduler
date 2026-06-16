@@ -1,79 +1,70 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="max-w-4xl mx-auto px-4 py-6">
+<div class="max-w-7xl mx-auto px-4 py-8">
     
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-        <div>
-            <h1 class="text-2xl md:text-3xl font-extrabold text-white tracking-tight">Task Matrix</h1>
-            <p class="text-sm text-slate-400 mt-1">Ingest operational targets and define structural dependencies.</p>
-        </div>
-        <div class="flex items-center gap-2">
-            <a href="{{ url_for('calendar_view') }}" class="inline-flex items-center justify-center bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition duration-150 shadow-lg shadow-purple-950/20">
-                📅 Open Calendar View
-            </a>
-            <a href="{{ url_for('index') }}" class="inline-flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium px-4 py-2.5 rounded-xl transition duration-150">
-                ← Back to Timeline
-            </a>
-        </div>
+    <div class="mb-10">
+        <h1 class="text-2xl md:text-3xl font-extrabold text-white tracking-tight">System Tasks Control Queue</h1>
+        <p class="text-sm text-slate-400 mt-1">Review, append, and filter active schedule objectives</p>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         
         <div class="lg:col-span-5">
-            <div class="bg-[#030712] border border-slate-900 rounded-3xl p-6 shadow-2xl shadow-black/50 sticky top-6">
-                <h2 class="text-2xl font-extrabold text-white tracking-tight mb-5">Ingest Target Task</h2>
+            <div class="bg-[#030712] border border-slate-900 rounded-3xl p-6 md:p-8 shadow-2xl">
+                <h2 class="text-xl font-extrabold text-white tracking-tight mb-6">Ingest Target Task</h2>
                 
-                <form action="{{ url_for('manage_tasks') }}" method="POST" class="space-y-4">
-                    
+                <form action="{{ url_for('manage_tasks') }}" method="POST" class="space-y-5">
                     <div class="flex flex-col">
-                        <label class="text-sm font-medium text-slate-400 tracking-wide mb-1.5">Task Title</label>
-                        <input type="text" name="title" placeholder="e.g., Run application vulnerability scan" required 
-                               class="w-full bg-[#0b0f19] border border-slate-800/80 rounded-xl p-3.5 text-base text-white placeholder-slate-600 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 transition duration-150">
+                        <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Task Title</label>
+                        <input type="text" name="title" required placeholder="e.g., Run application vulnerability scan" 
+                               class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-base text-white outline-none focus:border-blue-500 transition shadow-inner">
                     </div>
 
                     <div class="flex flex-col">
-                        <label class="text-sm font-medium text-slate-400 tracking-wide mb-1.5">Prerequisite Target (Optional)</label>
-                        <select name="parent_id" class="w-full bg-[#0b0f19] border border-slate-800/80 rounded-xl p-3.5 text-sm text-slate-300 outline-none focus:border-blue-500 transition duration-150">
+                        <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Prerequisite Target (Optional)</label>
+                        <select name="parent_id" class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-sm text-slate-300 outline-none focus:border-blue-500 transition shadow-inner">
                             <option value="">-- No Structural Prerequisite --</option>
-                            {% for t in tasks %}
-                            <option value="{{ t['id'] }}">Block until: {{ t['title'] }}</option>
-                            {% endfor %}
+                            {% if tasks %}
+                                {% for t in tasks %}
+                                <option value="{{ t['id'] }}">Block until: {{ t['title'] }}</option>
+                                {% endfor %}
+                            {% endif %}
                         </select>
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
                         <div class="flex flex-col">
-                            <label class="text-sm font-medium text-slate-400 tracking-wide mb-1.5">Importance (1-5)</label>
+                            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Importance (1-5)</label>
                             <input type="number" name="priority" min="1" max="5" value="3" required 
-                                   class="w-full bg-[#0b0f19] border border-slate-800/80 rounded-xl p-3.5 text-base text-white outline-none focus:border-blue-500 transition duration-150">
+                                   class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-blue-500 transition text-center">
                         </div>
                         <div class="flex flex-col">
-                            <label class="text-sm font-medium text-slate-400 tracking-wide mb-1.5">Urgency (1-5)</label>
+                            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Urgency (1-5)</label>
                             <input type="number" name="urgency" min="1" max="5" value="3" required 
-                                   class="w-full bg-[#0b0f19] border border-slate-800/80 rounded-xl p-3.5 text-base text-white outline-none focus:border-blue-500 transition duration-150">
+                                   class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-blue-500 transition text-center">
                         </div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
                         <div class="flex flex-col">
-                            <label class="text-sm font-medium text-slate-400 tracking-wide mb-1.5">Difficulty (1-5)</label>
+                            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Difficulty (1-5)</label>
                             <input type="number" name="difficulty" min="1" max="5" value="3" required 
-                                   class="w-full bg-[#0b0f19] border border-slate-800/80 rounded-xl p-3.5 text-base text-white outline-none focus:border-blue-500 transition duration-150">
+                                   class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-blue-500 transition text-center">
                         </div>
                         <div class="flex flex-col">
-                            <label class="text-sm font-medium text-slate-400 tracking-wide mb-1.5">Duration (Min)</label>
+                            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Duration (Min)</label>
                             <input type="number" name="duration" min="5" step="5" placeholder="e.g. 90" required 
-                                   class="w-full bg-[#0b0f19] border border-slate-800/80 rounded-xl p-3.5 text-base text-white placeholder-slate-600 outline-none focus:border-blue-500 transition duration-150">
+                                   class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-blue-500 transition text-center">
                         </div>
                     </div>
 
                     <div class="flex flex-col">
-                        <label class="text-sm font-medium text-slate-400 tracking-wide mb-1.5">Due Date</label>
+                        <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Due Date</label>
                         <input type="date" name="due_date" required 
-                               class="w-full bg-[#0b0f19] border border-slate-800/80 rounded-xl p-3.5 text-base text-white outline-none focus:border-blue-500 transition duration-150 color-scheme-dark">
+                               class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-blue-500 transition color-scheme-dark">
                     </div>
 
-                    <button type="submit" class="w-full bg-[#0084d1] hover:bg-[#0074b8] text-white font-bold py-4 px-4 rounded-xl shadow-lg shadow-blue-950/30 tracking-wide transition duration-150 active:scale-[0.98] transform-gpu touch-manipulation mt-4">
+                    <button type="submit" class="w-full bg-[#0084d1] hover:bg-[#0074b8] text-white font-bold py-4 px-4 rounded-xl tracking-wide transition duration-150 transform-gpu active:scale-[0.99] mt-4 shadow-lg">
                         Inject into Matrix
                     </button>
                 </form>
@@ -81,40 +72,43 @@
         </div>
 
         <div class="lg:col-span-7">
-            <div class="bg-[#030712] border border-slate-900 rounded-3xl p-6 shadow-2xl shadow-black/50">
-                <h2 class="text-xl font-bold text-white mb-4">Pending Backlog Ledger Matrix</h2>
+            <div class="bg-[#030712] border border-slate-900 rounded-3xl p-6 md:p-8 shadow-2xl min-h-[400px]">
+                <h2 class="text-xl font-bold text-white tracking-tight mb-6">Pending Backlog Ledger Matrix</h2>
                 
                 {% if not tasks %}
-                <div class="text-center py-16 border border-dashed border-slate-800 rounded-2xl">
-                    <p class="text-base text-slate-500 font-medium">No active metrics found inside memory pool.</p>
-                    <p class="text-xs text-slate-600 mt-1">Use the injection sidebar panel to process initial entries.</p>
+                <div class="text-center py-24 border border-dashed border-slate-800/80 rounded-2xl bg-[#0b0f19]/30">
+                    <div class="text-slate-600 text-3xl mb-3">📋</div>
+                    <p class="text-slate-400 font-medium text-base">No active metrics found inside memory pool.</p>
+                    <p class="text-xs text-slate-500 mt-2 max-w-sm mx-auto px-4">Use the injection sidebar panel to process initial tasks for your workspace.</p>
                 </div>
                 {% else %}
-                <div class="space-y-3.5">
-                    {% for task in tasks %}
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#0b0f19] border border-slate-800/60 rounded-xl gap-4 hover:border-slate-700 transition duration-150">
-                        <div class="space-y-1">
-                            <p class="font-semibold text-white text-base tracking-tight">{{ task['title'] }}</p>
+                <div class="space-y-4">
+                    {% for t in tasks %}
+                    <div class="p-4 bg-[#0b0f19] border border-slate-800/60 rounded-xl flex items-center justify-between gap-4 group">
+                        <div class="flex items-center gap-4">
+                            <form action="{{ url_for('complete_task', task_id=t['id']) }}" method="POST">
+                                <button type="submit" class="w-6 h-6 rounded-lg border-2 border-slate-700 hover:border-emerald-500 flex items-center justify-center text-transparent hover:text-emerald-500 bg-slate-950 transition-colors duration-150" title="Mark Task Finished">
+                                    ✓
+                                </button>
+                            </form>
                             
-                            <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400 pt-0.5">
-                                <span class="bg-[#030712] border border-slate-800/80 px-2 py-0.5 rounded-md text-slate-300">Importance: {{ task['priority'] }}</span>
-                                <span class="bg-[#030712] border border-slate-800/80 px-2 py-0.5 rounded-md text-slate-300">Difficulty: {{ task['difficulty'] }}</span>
-                                <span class="text-blue-400 font-semibold">{{ task['duration'] }} mins</span>
-                                {% if task['due_date'] %}
-                                <span class="text-rose-400 font-medium pl-2 border-l border-slate-800">Due: {{ task['due_date'] }}</span>
-                                {% endif %}
-                                {% if task['parent_id'] %}
-                                <span class="text-amber-400 font-medium pl-2 border-l border-slate-800">⚠️ Link Active</span>
-                                {% endif %}
+                            <div>
+                                <p class="text-base font-semibold text-white tracking-tight">{{ t['title'] }}</p>
+                                <div class="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-slate-400">
+                                    <span class="bg-blue-950/40 text-blue-400 px-2 py-0.5 rounded border border-blue-900/30">Dur: {{ t['duration'] }}m</span>
+                                    <span class="bg-purple-950/40 text-purple-400 px-2 py-0.5 rounded border border-purple-900/30">Priority: {{ t['priority'] }}</span>
+                                    {% if t['due_date'] %}
+                                    <span class="text-slate-500">📅 Due: {{ t['due_date'] }}</span>
+                                    {% endif %}
+                                </div>
                             </div>
                         </div>
-                        
-                        <div class="flex sm:self-center self-end">
-                            <a href="{{ url_for('complete_task', task_id=task['id']) }}" 
-                               class="w-full sm:w-auto inline-flex items-center justify-center bg-emerald-950 border border-emerald-800 text-emerald-400 text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-emerald-900 transition duration-150">
-                                ✓ Complete
-                            </a>
-                        </div>
+
+                        <form action="{{ url_for('delete_task', task_id=t['id']) }}" method="POST" onsubmit="return confirm('Drop this task from memory backlog?');">
+                            <button type="submit" class="text-slate-600 hover:text-rose-400 opacity-0 group-hover:opacity-100 text-sm font-semibold transition-all p-2 duration-150">
+                                🗑️
+                            </button>
+                        </form>
                     </div>
                     {% endfor %}
                 </div>

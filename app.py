@@ -4,6 +4,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(24))
@@ -85,16 +86,26 @@ def init_db():
 
 def run_scheduling_engine(user_id):
     db = get_db()
+    
+    # 🔒 PRIVACY FIX 1: Isolate tasks by user_id and verify structural prerequisites
     raw_tasks = db.execute('''
         SELECT t.* FROM tasks t 
-        WHERE t.is_completed = 0 
-        AND (t.parent_id IS NULL OR t.parent_id IN (SELECT id FROM tasks WHERE is_completed = 1))
-    ''').fetchall()
+        WHERE t.user_id = ? 
+        AND t.is_completed = 0 
+        AND (t.parent_id IS NULL OR t.parent_id IN (SELECT id FROM tasks WHERE is_completed = 1 AND user_id = ?))
+    ''', (user_id, user_id)).fetchall()
     
     tasks = [dict(t) for t in raw_tasks]
-    commitments = db.execute("SELECT * FROM commitments ORDER BY start_time ASC").fetchall()
     
-    raw_energy = db.execute("SELECT * FROM user_energy").fetchall()
+    # 🔒 PRIVACY FIX 2: Isolate commitments by user_id
+    commitments = db.execute(
+        "SELECT * FROM commitments WHERE user_id = ? ORDER BY start_time ASC", 
+        (user_id,)
+    ).fetchall()
+    
+    # 🔒 PRIVACY FIX 3: Isolate energy metrics by user_id (assuming user_id column exists here)
+    # If your user_energy table does not have a user_id column yet, use: "SELECT * FROM user_energy"
+    raw_energy = db.execute("SELECT * FROM user_energy WHERE user_id = ?", (user_id,)).fetchall()
     energy_map = {row['hour']: row['energy_level'] for row in raw_energy}
     
     profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (user_id,)).fetchone()
@@ -227,6 +238,7 @@ def index():
     if not is_authenticated():
         return redirect(url_for('login'))
     db = get_db()
+    current_user = session['user_id']
     profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (session['user_id'],)).fetchone()
     
     if not profile:
@@ -234,7 +246,10 @@ def index():
         return redirect(url_for('login'))
         
     timeline = run_scheduling_engine(session['user_id'])
-    all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
+    all_tasks = db.execute(
+        "SELECT * FROM tasks WHERE is_completed = 0 AND user_id = ?", 
+        (current_user,)
+    ).fetchall()
     
     return render_template('scheduler.html', timeline=timeline, profile=profile, tasks=all_tasks)
 
@@ -310,6 +325,59 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
+@app.route('/profile')
+def profile():
+    if not is_authenticated():
+        return redirect(url_for('login'))
+        
+    db = get_db()
+    current_user = session['user_id']
+    
+    # Fetch the logged-in user's profile details from the database
+    profile_data = db.execute("SELECT * FROM user_profile WHERE id = ?", (current_user,)).fetchone()
+    
+    # If no profile record exists yet, create an empty dictionary structure so the HTML doesn't crash
+    if not profile_data:
+        profile_data = {'name': 'Authenticated Profile', 'email': ''}
+        
+    return render_template('profile.html', profile=profile_data)
+
+# ==========================================
+# TASK ACTIONS: UPDATE, DELETE, COMPLETE
+# ==========================================
+
+@app.route('/tasks/delete/<int:task_id>', methods=['POST'])
+def delete_task(task_id):
+    if not is_authenticated():
+        return redirect(url_for('login'))
+    
+    db = get_db()
+    db.execute("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, session['user_id']))
+    db.commit()
+    return redirect(url_for('manage_tasks'))
+
+
+# ==========================================
+# COMMITMENT ACTIONS: DELETE/UPDATE
+# ==========================================
+
+@app.route('/commitments/delete/<int:commitment_id>', methods=['POST'])
+def delete_commitment(commitment_id):
+    if not is_authenticated():
+        return redirect(url_for('login'))
+    
+    db = get_db()
+    # Cascading cleanup: If deleting a main event, also drop its child travel block
+    db.execute(
+        """
+        DELETE FROM commitments 
+        WHERE (id = ? OR parent_commitment_id = ?) AND user_id = ?
+        """, 
+        (commitment_id, commitment_id, session['user_id'])
+    )
+    db.commit()
+    return redirect(url_for('manage_commitments'))
+
 @app.route('/tasks', methods=['GET', 'POST'])
 def manage_tasks():
     if not is_authenticated(): 
@@ -357,53 +425,53 @@ def manage_commitments():
     current_user = session.get('user_id')
     
     if request.method == 'POST':
-        db.execute(
+        title = request.form['title']
+        start_str = request.form['start_time']
+        end_str = request.form['end_time']
+        travel_duration = int(request.form.get('travel_time', 0)) # in minutes
+        
+        # 1. Insert the main event commitment block
+        cursor = db.execute(
             """
-            INSERT INTO commitments (user_id, title, start_time, end_time) 
-            VALUES (?, ?, ?, ?)
+            INSERT INTO commitments (user_id, title, start_time, end_time, is_travel_block) 
+            VALUES (?, ?, ?, ?, 0)
             """,
-            (
-                current_user,
-                request.form['title'],
-                request.form['start_time'],
-                request.form['end_time']
-            )
+            (current_user, title, start_str, end_str)
         )
+        main_event_id = cursor.lastrowid
+        
+        # 2. Automatically account for travel time if requested
+        if travel_duration > 0:
+            event_start = datetime.strptime(start_str, "%Y-%m-%dT%H:%M")
+            
+            # Calculate commute window right before the event starts
+            travel_start = event_start - timedelta(minutes=travel_duration)
+            travel_end = event_start
+            
+            db.execute(
+                """
+                INSERT INTO commitments (user_id, title, start_time, end_time, parent_commitment_id, is_travel_block) 
+                VALUES (?, ?, ?, ?, ?, 1)
+                """,
+                (
+                    current_user,
+                    f"🚗 Commute: {title}",
+                    travel_start.strftime("%Y-%m-%dT%H:%M"),
+                    travel_end.strftime("%Y-%m-%dT%H:%M"),
+                    main_event_id
+                )
+            )
+            
         db.commit()
-        # After saving, reload THIS SAME page so they see their updated list
         return redirect(url_for('manage_commitments'))
         
-    # GET Request: Fetch all fixed commitments belonging to this user
-    all_commitments = db.execute(
+    # GET Request logic remains exactly the same
+    commitments = db.execute(
         "SELECT * FROM commitments WHERE user_id = ? ORDER BY start_time ASC", 
         (current_user,)
     ).fetchall()
     
-    # Render the commitments.html page and pass the data into it
-    return render_template('commitments.html', commitments=all_commitments)
-
-@app.route('/profile', methods=['GET', 'POST'])
-def profile_settings():
-    if not is_authenticated(): 
-        return redirect(url_for('login'))
-        
-    db = get_db()
-    
-    if request.method == 'POST':
-        # Updates the user profile parameters inside your scheduler database
-        db.execute('''
-            UPDATE user_profile 
-            SET name = ?, age = ?, occupation = ?, wake_time = ? 
-            WHERE id = ?
-        ''', (request.form['name'], request.form['age'], request.form['occupation'], request.form['wake_time'], session['user_id']))
-        db.commit()
-        
-        flash("Profile updated successfully!", "success")
-        return redirect(url_for('profile_settings'))
-        
-    # GET Request: Fetch the current data parameters to fill in the form fields
-    profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (session['user_id'],)).fetchone()
-    return render_template('profile.html', profile=profile)
+    return render_template('commitments.html', commitments=commitments)
         
 @app.route('/energy', methods=['GET', 'POST'])
 def manage_energy():
@@ -419,13 +487,15 @@ def manage_energy():
     energy_levels = db.execute("SELECT * FROM user_energy ORDER BY hour ASC").fetchall()
     return render_template('energy.html', energy_levels=energy_levels)
 
-@app.route('/complete-task/<int:task_id>')
+@app.route('/tasks/complete/<int:task_id>', methods=['POST'])
 def complete_task(task_id):
-    if not is_authenticated(): return redirect(url_for('login'))
+    if not is_authenticated():
+        return redirect(url_for('login'))
+    
     db = get_db()
-    db.execute("UPDATE tasks SET is_completed = 1 WHERE id = ?", (task_id,))
+    db.execute("UPDATE tasks SET is_completed = 1 WHERE id = ? AND user_id = ?", (task_id, session['user_id']))
     db.commit()
-    return redirect(url_for('index'))
+    return redirect(url_for('manage_tasks'))
 
 @app.route('/clear-commitments')
 def clear_commitments():

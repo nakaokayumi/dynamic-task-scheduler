@@ -4,39 +4,42 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Matrix Scheduler</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex flex-col">
-    <nav class="bg-[#030712] border-b border-slate-900 px-6 py-4">
-    <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
-        
-        <a href="{{ url_for('index') }}" class="text-xl font-black text-white tracking-wider flex items-center gap-2 shrink-0">
-            ⚡ Matrix Scheduler
-        </a>
+<body class="bg-[#020617] text-slate-100 min-h-screen font-sans antialiased">
 
-        <div class="flex items-center flex-nowrap whitespace-nowrap gap-4 md:gap-6 overflow-x-auto no-scrollbar">
-            <a href="{{ url_for('index') }}" class="text-slate-300 hover:text-white text-sm font-medium transition">Dashboard</a>
-            <a href="{{ url_for('manage_tasks') }}" class="text-slate-300 hover:text-white text-sm font-medium transition">Tasks Queue</a>
-            <a href="{{ url_for('manage_commitments') }}" class="text-slate-300 hover:text-white text-sm font-medium transition">Fixed Commitments</a>
-            <a href="{{ url_for('manage_energy') }}" class="text-slate-300 hover:text-white text-sm font-medium flex items-center gap-1 transition">⚡ Energy Profile</a>
+    <nav class="bg-[#030712] border-b border-slate-900/80 px-4 md:px-8 py-4">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
             
-            <span class="text-slate-800 self-center hidden sm:inline">|</span>
-            
-            <a href="{{ url_for('profile_settings') }}" class="text-slate-300 hover:text-white text-sm font-medium flex items-center gap-1.5 transition">
-                <span class="text-purple-400">👤</span> Profile Settings
+            <a href="{{ url_for('index') }}" class="text-lg md:text-xl font-black text-white tracking-wider flex items-center gap-2 shrink-0">
+                ⚡ Matrix Scheduler
             </a>
-            
-            <span class="text-slate-800 self-center hidden sm:inline">|</span>
-            
-            <a href="{{ url_for('logout') }}" class="text-rose-400 hover:text-rose-300 text-sm font-semibold flex items-center gap-1.5 transition shrink-0">
-                🔒 Logout
-            </a>
+
+            <div class="flex items-center justify-center flex-wrap gap-x-5 gap-y-2 text-center">
+                <a href="{{ url_for('index') }}" class="text-slate-300 hover:text-white text-sm font-medium transition tracking-tight">Dashboard</a>
+                <a href="{{ url_for('manage_tasks') }}" class="text-slate-300 hover:text-white text-sm font-medium transition tracking-tight">Tasks Queue</a>
+                <a href="{{ url_for('manage_commitments') }}" class="text-slate-300 hover:text-white text-sm font-medium transition tracking-tight">Fixed Commitments</a>
+                <a href="{{ url_for('manage_energy') }}" class="text-slate-300 hover:text-white text-sm font-medium flex items-center gap-1 transition tracking-tight">⚡ Energy Profile</a>
+                
+                <span class="text-slate-800 hidden md:inline">|</span>
+                
+                <a href="{{ url_for('profile') }}" class="text-slate-300 hover:text-white text-sm font-medium flex items-center gap-1.5 transition tracking-tight">
+                    <span class="text-purple-400">👤</span> Settings
+                </a>
+                
+                <span class="text-slate-800 hidden md:inline">|</span>
+                
+                <a href="{{ url_for('logout') }}" class="text-rose-400 hover:text-rose-300 text-sm font-semibold flex items-center gap-1.5 transition tracking-tight">
+                    🔒 Logout
+                </a>
+            </div>
+
         </div>
+    </nav>
 
-    </div>
-</nav>
-    <main class="flex-grow p-6 md:p-10 max-w-7xl w-full mx-auto">
+    <main class="w-full">
         {% block content %}{% endblock %}
     </main>
+
 </body>
 </html>

@@ -7,7 +7,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(24))
-DATABASE = "scheduler_v3.db"  # Upgraded versioning to safely migrate schema layouts
+DATABASE = "scheduler.db"  # Upgraded versioning to safely migrate schema layouts
 
 def get_db():
     conn = sqlite3.connect(DATABASE, check_same_thread=False)

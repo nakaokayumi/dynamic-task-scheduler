@@ -239,7 +239,7 @@ def index():
     timeline = run_scheduling_engine(session['user_id'])
     all_tasks = db.execute("SELECT * FROM tasks WHERE user_id = ? AND is_completed = 0", (session['user_id'],)).fetchall()
     
-    return render_template('scheduler.html', timeline=timeline, profile=profile, tasks=all_tasks)
+    return render_template('index.html', timeline=timeline, profile=profile, tasks=all_tasks)
 
 @app.route('/calendar')
 def calendar_view():

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-12">
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="mb-6 p-4 rounded-xl text-center text-sm font-medium {% if category == 'success' %}bg-emerald-950/40 border border-emerald-900/60 text-emerald-400{% else %}bg-rose-950/40 border border-rose-900/60 text-rose-400{% endif %}" role="alert">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="bg-[#030712] border border-slate-900 rounded-3xl p-6 md:p-8 shadow-2xl">
+        
+        <div class="flex items-center justify-between border-b border-slate-900 pb-6 mb-8">
+            <div>
+                <h1 class="text-xl md:text-2xl font-extrabold text-white tracking-tight">⚙️ Profile Configuration</h1>
+                <p class="text-xs text-slate-500 mt-1">Calibrate baseline user identity parameters</p>
+            </div>
+            <a href="{{ url_for('index') }}" class="bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white text-xs font-semibold px-4 py-2 rounded-xl border border-slate-800 transition">
+                Return to Matrix
+            </a>
+        </div>
+        
+        <form action="{{ url_for('profile_settings') }}" method="POST" class="space-y-6">
+            
+            <div class="flex flex-col">
+                <label class="text-sm font-medium text-slate-400 mb-1.5">Full Operator Name</label>
+                <input type="text" name="name" class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-base text-white outline-none focus:border-blue-500 transition" value="{{ profile.name if profile else '' }}" required placeholder="Operator identity token">
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium text-slate-400 mb-1.5">Age Matrix</label>
+                    <input type="number" name="age" class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-blue-500 transition" value="{{ profile.age if profile else '' }}" placeholder="Years elapsed">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium text-slate-400 mb-1.5">Current Specialization / Occupation</label>
+                    <input type="text" name="occupation" class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-blue-500 transition" value="{{ profile.occupation if profile else '' }}" placeholder="e.g., Cyber Security Analyst">
+                </div>
+            </div>
+
+            <div class="flex flex-col">
+                <label class="text-sm font-medium text-slate-400 mb-1.5">Baseline Day-Start Metric (Typical Wake Up Hour)</label>
+                <input type="time" name="wake_time" class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-blue-500 transition color-scheme-dark" value="{{ profile.wake_time if profile else '07:00' }}" required>
+                <span class="text-[11px] text-slate-500 mt-2">Adjusting this index dynamically alters your daily timeline matrix generation baseline.</span>
+            </div>
+
+            <div class="flex flex-col border-t border-slate-900/60 pt-6">
+                <label class="text-sm font-medium text-slate-500 mb-1.5">Identity Reference (Read-Only Security Constraint)</label>
+                <input type="email" class="w-full bg-[#060a12] border border-slate-950 text-slate-500 cursor-not-allowed rounded-xl p-3 text-sm outline-none" value="{{ profile.email if profile else '' }}" readonly>
+            </div>
+
+            <button type="submit" class="w-full bg-[#0084d1] hover:bg-[#0074b8] text-white font-bold py-3.5 px-4 rounded-xl tracking-wide transition duration-150 transform-gpu active:scale-[0.99] mt-4">
+                Commit Operational Metric Changes
+            </button>
+        </form>
+    </div>
+</div>
+
+<style>
+    .color-scheme-dark {
+        color-scheme: dark;
+    }
+</style>
+{% endblock %}

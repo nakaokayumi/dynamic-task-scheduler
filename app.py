@@ -322,18 +322,46 @@ def manage_tasks():
             (parent_val, request.form['title'], request.form['priority'], request.form['urgency'], request.form['difficulty'], request.form['duration'], request.form['due_date'])
         )
         db.commit()
-    return redirect(url_for('index'))
+        return redirect(url_for('manage_tasks'))
+    all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0 ORDER BY id DESC").fetchall()
+    return render_template('tasks.html', tasks=all_tasks)       
 
 @app.route('/commitments', methods=['GET', 'POST'])
 def manage_commitments():
-    if not is_authenticated(): return redirect(url_for('login'))
+    if not is_authenticated():
+        return redirect(url_for('login'))
     db = get_db()
     if request.method == 'POST':
         db.execute("INSERT INTO commitments (title, start_time, end_time) VALUES (?, ?, ?)",
                    (request.form['title'], request.form['start_time'], request.form['end_time']))
         db.commit()
-    return redirect(url_for('index'))
+        return redirect(url_for('manage_commitments'))
+    commitments = db.execute("SELECT * FROM commitments ORDER BY start_time ASC").fetchall()
+    return render_template('commitments.html', commitments=commitments)
 
+@app.route('/profile', methods=['GET', 'POST'])
+def profile_settings():
+    if not is_authenticated(): 
+        return redirect(url_for('login'))
+        
+    db = get_db()
+    
+    if request.method == 'POST':
+        # Updates the user profile parameters inside your scheduler database
+        db.execute('''
+            UPDATE user_profile 
+            SET name = ?, age = ?, occupation = ?, wake_time = ? 
+            WHERE id = ?
+        ''', (request.form['name'], request.form['age'], request.form['occupation'], request.form['wake_time'], session['user_id']))
+        db.commit()
+        
+        flash("Profile updated successfully!", "success")
+        return redirect(url_for('profile_settings'))
+        
+    # GET Request: Fetch the current data parameters to fill in the form fields
+    profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (session['user_id'],)).fetchone()
+    return render_template('profile.html', profile=profile)
+        
 @app.route('/energy', methods=['GET', 'POST'])
 def manage_energy():
     if not is_authenticated(): return redirect(url_for('login'))

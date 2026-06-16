@@ -48,9 +48,6 @@ def init_db():
             )
         ''')
 
-        # RESET PATCH: Clean wipe to handle due_date and parent_id schemas perfectly
-        conn.execute('DROP TABLE IF EXISTS tasks')
-
         # TASKS TABLE (Equipped with parent_id for dependencies)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
@@ -96,7 +93,6 @@ def init_db():
 def run_scheduling_engine():
     db = get_db()
     
-    # ADVANCED FEATURE: Only pull tasks that either have no parent, or whose parent is already completed!
     raw_tasks = db.execute('''
         SELECT t.* FROM tasks t 
         WHERE t.is_completed = 0 
@@ -232,14 +228,12 @@ def index():
     timeline = run_scheduling_engine()
     return render_template('index.html', timeline=timeline, profile=profile)
 
-# CALENDAR DASHBOARD ROUTE VIEW
 @app.route('/calendar')
 def calendar_view():
     if not is_authenticated():
         return redirect(url_for('login'))
     return render_template('calendar.html')
 
-# --- API ENDPOINT FOR FULLCALENDAR.JS FEED ---
 @app.route('/api/calendar-events')
 def calendar_events():
     if not is_authenticated():
@@ -247,7 +241,6 @@ def calendar_events():
     db = get_db()
     events = []
     
-    # Fetch commitments
     commitments = db.execute("SELECT * FROM commitments").fetchall()
     for c in commitments:
         events.append({
@@ -258,7 +251,6 @@ def calendar_events():
             "borderColor": "#334155"
         })
         
-    # Fetch pending tasks mapped onto their targeted due dates
     tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
     for t in tasks:
         if t['due_date']:
@@ -316,7 +308,6 @@ def manage_tasks():
         db.commit()
         return redirect(url_for('manage_tasks'))
         
-    # Grab all tasks so the user can select dependencies from the list
     all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
     return render_template('tasks.html', tasks=all_tasks)
 

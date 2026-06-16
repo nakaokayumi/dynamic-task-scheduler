@@ -14,15 +14,13 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-# --- CYBERSECURITY LAYER: PBKDF2-SHA256 PASSWORD HASHING ---
+# --- PBKDF2-SHA256 SECURE SECURITY LAYER ---
 def hash_password(password: str) -> str:
-    """Generates a secure PBKDF2-SHA256 password hash using a unique salt."""
     salt = secrets.token_hex(16)
     key = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 600000)
     return f"pbkdf2:sha256:600000${salt}${key.hex()}"
 
 def check_password(stored_hash: str, password: str) -> bool:
-    """Verifies a password against the stored PBKDF2 hash."""
     try:
         parts = stored_hash.split('$')
         salt = parts[1]
@@ -33,9 +31,7 @@ def check_password(stored_hash: str, password: str) -> bool:
         return False
 
 def init_db():
-    """Initializes the database schema cleanly on app startup."""
     with get_db() as conn:
-        # USER TABLE
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_profile (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,7 +44,6 @@ def init_db():
             )
         ''')
 
-        # TASKS TABLE (Equipped with parent_id for dependencies)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,7 +59,6 @@ def init_db():
             )
         ''')
 
-        # COMMITMENTS TABLE
         conn.execute('''
             CREATE TABLE IF NOT EXISTS commitments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,7 +68,6 @@ def init_db():
             )
         ''')
 
-        # ENERGY TABLE
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_energy (
                 hour INTEGER PRIMARY KEY,
@@ -92,7 +85,6 @@ def init_db():
 
 def run_scheduling_engine():
     db = get_db()
-    
     raw_tasks = db.execute('''
         SELECT t.* FROM tasks t 
         WHERE t.is_completed = 0 
@@ -218,7 +210,7 @@ def run_scheduling_engine():
 def is_authenticated():
     return "user_id" in session
 
-# --- ROUTING SYSTEM ---
+# --- ROUTING PATTERNS ---
 @app.route('/')
 def index():
     if not is_authenticated():
@@ -226,7 +218,9 @@ def index():
     db = get_db()
     profile = db.execute("SELECT * FROM user_profile LIMIT 1").fetchone()
     timeline = run_scheduling_engine()
-    return render_template('index.html', timeline=timeline, profile=profile)
+    
+    # FORCED COMPLIANCE: Directing root view right back to your preferred original filename
+    return render_template('scheduler.html', timeline=timeline, profile=profile)
 
 @app.route('/calendar')
 def calendar_view():
@@ -306,10 +300,10 @@ def manage_tasks():
             (request.form['title'], request.form['priority'], request.form['urgency'], request.form['difficulty'], request.form['duration'], request.form['due_date'], parent_val)
         )
         db.commit()
-        return redirect(url_for('manage_tasks'))
+        return redirect(url_for('index')) # Redirect back to the dashboard layout loop
         
     all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
-    return render_template('tasks.html', tasks=all_tasks)
+    return render_template('scheduler.html', tasks=all_tasks)
 
 @app.route('/commitments', methods=['GET', 'POST'])
 def manage_commitments():
@@ -319,9 +313,8 @@ def manage_commitments():
         db.execute("INSERT INTO commitments (title, start_time, end_time) VALUES (?, ?, ?)",
                    (request.form['title'], request.form['start_time'], request.form['end_time']))
         db.commit()
-        return redirect(url_for('manage_commitments'))
-    all_comm = db.execute("SELECT * FROM commitments").fetchall()
-    return render_template('commitments.html', commitments=all_comm)
+        return redirect(url_for('index'))
+    return redirect(url_for('index'))
 
 @app.route('/energy', methods=['GET', 'POST'])
 def manage_energy():
@@ -343,7 +336,7 @@ def complete_task(task_id):
     db = get_db()
     db.execute("UPDATE tasks SET is_completed = 1 WHERE id = ?", (task_id,))
     db.commit()
-    return redirect(url_for('manage_tasks'))
+    return redirect(url_for('index'))
 
 @app.route('/clear-commitments')
 def clear_commitments():
@@ -351,7 +344,7 @@ def clear_commitments():
     db = get_db()
     db.execute("DELETE FROM commitments")
     db.commit()
-    return redirect(url_for('manage_commitments'))
+    return redirect(url_for('index'))
 
 init_db()
 

@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-6">
+    
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
+        <div>
+            <h1 class="text-2xl md:text-3xl font-extrabold text-white tracking-tight">System Matrix Scheduler</h1>
+            <p class="text-sm text-slate-400 mt-1">Operational view for profile: <span class="text-sky-400 font-semibold">{{ profile['name'] if profile else 'Authenticated User' }}</span></p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <a href="{{ url_for('calendar_view') }}" class="bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition duration-150">📅 View Calendar Feed</a>
+            <a href="{{ url_for('manage_energy') }}" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium px-4 py-2.5 rounded-xl transition">⚡ Calibrate Energy Profile</a>
+            <a href="{{ url_for('logout') }}" class="bg-rose-950/40 border border-rose-900/60 text-rose-400 text-sm font-medium px-4 py-2.5 rounded-xl transition hover:bg-rose-900/20">Clear Session</a>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        
+        <div class="lg:col-span-5 space-y-6">
+            
+            <div class="bg-[#030712] border border-slate-900 rounded-3xl p-6 shadow-2xl">
+                <h2 class="text-xl font-extrabold text-white tracking-tight mb-4">Ingest Target Task</h2>
+                
+                <form action="{{ url_for('manage_tasks') }}" method="POST" class="space-y-4">
+                    <div class="flex flex-col">
+                        <label class="text-sm font-medium text-slate-400 mb-1">Task Title</label>
+                        <input type="text" name="title" required placeholder="e.g., Study Cryptography Notes" 
+                               class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-base text-white outline-none focus:border-blue-500 transition">
+                    </div>
+
+                    <div class="flex flex-col">
+                        <label class="text-sm font-medium text-slate-400 mb-1">Prerequisite Target (Optional)</label>
+                        <select name="parent_id" class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-sm text-slate-300 outline-none focus:border-blue-500 transition">
+                            <option value="">-- No Structural Prerequisite --</option>
+                            {% if tasks %}
+                                {% for t in tasks %}
+                                <option value="{{ t['id'] }}">Block until: {{ t['title'] }}</option>
+                                {% endfor %}
+                            {% endif %}
+                        </select>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="flex flex-col">
+                            <label class="text-sm font-medium text-slate-400 mb-1">Importance (1-5)</label>
+                            <input type="number" name="priority" min="1" max="5" value="3" required 
+                                   class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-blue-500 transition">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-sm font-medium text-slate-400 mb-1">Urgency (1-5)</label>
+                            <input type="number" name="urgency" min="1" max="5" value="3" required 
+                                   class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-blue-500 transition">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="flex flex-col">
+                            <label class="text-sm font-medium text-slate-400 mb-1">Difficulty (1-5)</label>
+                            <input type="number" name="difficulty" min="1" max="5" value="3" required 
+                                   class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-blue-500 transition">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-sm font-medium text-slate-400 mb-1">Duration (Min)</label>
+                            <input type="number" name="duration" min="5" step="5" placeholder="e.g. 90" required 
+                                   class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-blue-500 transition">
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col">
+                        <label class="text-sm font-medium text-slate-400 mb-1">Due Date</label>
+                        <input type="date" name="due_date" required 
+                               class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-blue-500 transition color-scheme-dark">
+                    </div>
+
+                    <button type="submit" class="w-full bg-[#0084d1] hover:bg-[#0074b8] text-white font-bold py-3.5 px-4 rounded-xl tracking-wide transition duration-150 transform-gpu active:scale-[0.99] mt-2">
+                        Inject into Matrix
+                    </button>
+                </form>
+            </div>
+
+            <div class="bg-[#030712] border border-slate-900 rounded-3xl p-6 shadow-2xl">
+                <h2 class="text-xl font-extrabold text-white tracking-tight mb-4">Lock Fixed Commitment</h2>
+                <form action="{{ url_for('manage_commitments') }}" method="POST" class="space-y-4">
+                    <div class="flex flex-col">
+                        <label class="text-sm font-medium text-slate-400 mb-1">Commitment Title</label>
+                        <input type="text" name="title" required placeholder="e.g., Polytechnic Lectures" class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-white outline-none">
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="flex flex-col">
+                            <label class="text-sm font-medium text-slate-400 mb-1">Start Window</label>
+                            <input type="datetime-local" name="start_time" required class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-sm text-white color-scheme-dark">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-sm font-medium text-slate-400 mb-1">End Window</label>
+                            <input type="datetime-local" name="end_time" required class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3 text-sm text-white color-scheme-dark">
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold py-3 px-4 rounded-xl transition">
+                        Lock Absolute Commitment
+                    </button>
+                </form>
+                <div class="mt-3">
+                    <a href="{{ url_for('clear_commitments') }}" class="block w-full text-center text-xs text-rose-400/70 hover:text-rose-400 font-medium py-1">Wipe All Calendar Fixed Commitments</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-7">
+            <div class="bg-[#030712] border border-slate-900 rounded-3xl p-6 shadow-2xl">
+                <h2 class="text-xl font-bold text-white mb-4">Engine Matrix Allocation Timeline</h2>
+                
+                {% if not timeline %}
+                <div class="text-center py-16 border border-dashed border-slate-800 rounded-2xl">
+                    <p class="text-slate-500 font-medium">Timeline matrix is currently clear.</p>
+                    <p class="text-xs text-slate-600 mt-1">Inject tasks or adjust system parameters to construct engine metrics.</p>
+                </div>
+                {% else %}
+                <div class="relative border-l-2 border-slate-800/80 ml-4 pl-6 space-y-6">
+                    {% for item in timeline %}
+                    <div class="relative">
+                        <div class="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full border-2 {% if item['type'] == 'commitment' %}bg-slate-950 border-slate-500{% else %}bg-slate-950 border-blue-500{% endif %}"></div>
+                        
+                        <div class="p-4 bg-[#0b0f19] border border-slate-800/60 rounded-xl flex items-center justify-between gap-4">
+                            <div>
+                                <span class="text-xs font-bold text-slate-500 tracking-wider uppercase">{{ item['start'] }} — {{ item['end'] }}</span>
+                                <p class="text-base font-semibold text-white mt-0.5 tracking-tight">{{ item['title'] }}</p>
+                                <div class="flex items-center gap-2 mt-1.5 text-xs text-slate-400">
+                                    {% if item['type'] == 'commitment' %}
+                                    <span class="bg-slate-900 px-2 py-0.5 rounded text-slate-400 font-medium border border-slate-800">Fixed Block</span>
+                                    {% else %}
+                                    <span class="bg-blue-950/50 text-blue-400 px-2 py-0.5 rounded font-medium border border-blue-900/30">Rank Value: {{ item['score'] }}</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<style>
+    .color-scheme-dark {
+        color-scheme: dark;
+    }
+</style>
+{% endblock %}

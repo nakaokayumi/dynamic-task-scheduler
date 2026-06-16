@@ -58,6 +58,19 @@
                         </div>
                     </div>
 
+                    <div class="mb-4">
+                        <label class="block text-xs font-semibold text-purple-400 uppercase tracking-wider mb-2">
+                            Preferred Time Block (Optional for Routines)
+                        </label>
+                        <select name="preferred_period" 
+                                class="w-full bg-[#030712] border border-slate-800 text-slate-300 text-sm rounded-xl px-4 py-2.5 outline-none focus:border-purple-500 transition">
+                            <option value="">🏃 Regular Flexible Task (Anytime)</option>
+                            <option value="morning">🌅 Morning Routine (Wake up - 12pm)</option>
+                            <option value="afternoon">☀️ Afternoon Routine (12pm - 5pm)</option>
+                            <option value="evening">🌌 Evening Routine (5pm - 11pm)</option>
+                        </select>
+                    </div>
+
                     <div class="flex flex-col">
                         <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Due Date</label>
                         <input type="date" name="due_date" required 

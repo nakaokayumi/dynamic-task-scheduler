@@ -4,7 +4,6 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
-from datetime import datetime, timedelta
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(24))
@@ -33,6 +32,7 @@ def check_password(stored_hash: str, password: str) -> bool:
 
 def init_db():
     with get_db() as conn:
+        # User Profiles table
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_profile (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,66 +45,97 @@ def init_db():
             )
         ''')
 
+        # Tasks table (Strictly tied to user_id)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
                 parent_id INTEGER DEFAULT NULL,
                 title TEXT NOT NULL,
                 priority INTEGER CHECK(priority BETWEEN 1 AND 5),
                 urgency INTEGER CHECK(urgency BETWEEN 1 AND 5),
                 difficulty INTEGER CHECK(difficulty BETWEEN 1 AND 5),
                 duration INTEGER NOT NULL,
+                preferred_period TEXT CHECK(preferred_period IN ('morning', 'afternoon', 'evening')) NOT NULL,
                 due_date TEXT,
                 is_completed INTEGER DEFAULT 0,
-                FOREIGN KEY(parent_id) REFERENCES tasks(id) ON DELETE SET NULL
+                FOREIGN KEY(parent_id) REFERENCES tasks(id) ON DELETE SET NULL,
+                FOREIGN KEY(user_id) REFERENCES user_profile(id) ON DELETE CASCADE
             )
         ''')
 
+        # Commitments table (Strictly tied to user_id, includes travel_time)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS commitments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
                 title TEXT NOT NULL,
                 start_time TEXT NOT NULL,
-                end_time TEXT NOT NULL
+                end_time TEXT NOT NULL,
+                travel_time INTEGER DEFAULT 0,
+                FOREIGN KEY(user_id) REFERENCES user_profile(id) ON DELETE CASCADE
             )
         ''')
 
+        # User Routines table (Strictly tied to user_id)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_routines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                duration INTEGER NOT NULL,
+                preferred_period TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES user_profile(id) ON DELETE CASCADE
+            )
+        ''')
+
+        # User Energy Profiles table (Tied to user_id)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_energy (
-                hour INTEGER PRIMARY KEY,
-                energy_level INTEGER CHECK(energy_level BETWEEN 1 AND 5)
+                user_id INTEGER,
+                hour INTEGER,
+                energy_level INTEGER CHECK(energy_level BETWEEN 1 AND 5),
+                PRIMARY KEY (user_id, hour),
+                FOREIGN KEY(user_id) REFERENCES user_profile(id) ON DELETE CASCADE
             )
         ''')
+        conn.commit()
 
-        if not conn.execute("SELECT 1 FROM user_energy LIMIT 1").fetchone():
+# --- HELPER TO INITIALIZE ENERGY FOR NEW USERS ---
+def seed_default_energy(user_id):
+    with get_db() as conn:
+        # Only seed if no energy mapping exists for this user
+        if not conn.execute("SELECT 1 FROM user_energy WHERE user_id = ? LIMIT 1", (user_id,)).fetchone():
             default_profile = [
-                (h, 5 if 8 <= h <= 12 else (2 if 13 <= h <= 16 else 3))
+                (user_id, h, 5 if 8 <= h <= 12 else (2 if 13 <= h <= 16 else 3))
                 for h in range(0, 24)
             ]
-            conn.executemany("INSERT INTO user_energy (hour, energy_level) VALUES (?, ?)", default_profile)
-        conn.commit()
+            conn.executemany("INSERT INTO user_energy (user_id, hour, energy_level) VALUES (?, ?, ?)", default_profile)
+            conn.commit()
 
 def run_scheduling_engine(user_id):
     db = get_db()
     
-    # 🔒 PRIVACY FIX 1: Isolate tasks by user_id and verify structural prerequisites
-    raw_tasks = db.execute('''
-        SELECT t.* FROM tasks t 
-        WHERE t.user_id = ? 
-        AND t.is_completed = 0 
-        AND (t.parent_id IS NULL OR t.parent_id IN (SELECT id FROM tasks WHERE is_completed = 1 AND user_id = ?))
-    ''', (user_id, user_id)).fetchall()
+    schedule_timeline = []
+    free_slots = []
     
+    # 🛠️ ISOLATION FIX: Query tasks specific to this logged-in user
+    raw_tasks = db.execute(
+        """
+        SELECT id, parent_id, title, priority, urgency, difficulty, duration, preferred_period, due_date, is_completed
+        FROM tasks
+        WHERE is_completed = 0 AND user_id = ?
+        """, (user_id,)
+    ).fetchall()
+        
     tasks = [dict(t) for t in raw_tasks]
     
-    # 🔒 PRIVACY FIX 2: Isolate commitments by user_id
+    # 🛠️ ISOLATION FIX: Query commitments specific to this user
     commitments = db.execute(
-        "SELECT * FROM commitments WHERE user_id = ? ORDER BY start_time ASC", 
-        (user_id,)
+        "SELECT * FROM commitments WHERE user_id = ? ORDER BY start_time ASC", (user_id,)
     ).fetchall()
     
-    # 🔒 PRIVACY FIX 3: Isolate energy metrics by user_id (assuming user_id column exists here)
-    # If your user_energy table does not have a user_id column yet, use: "SELECT * FROM user_energy"
+    # 🛠️ ISOLATION FIX: Query energy maps specific to this user
     raw_energy = db.execute("SELECT * FROM user_energy WHERE user_id = ?", (user_id,)).fetchall()
     energy_map = {row['hour']: row['energy_level'] for row in raw_energy}
     
@@ -120,27 +151,69 @@ def run_scheduling_engine(user_id):
     current_timeline = datetime.combine(today, datetime.min.time()) + timedelta(hours=wake_hour)
     end_of_day = datetime.combine(today, datetime.min.time()) + timedelta(hours=24)
     
-    # 🛡️ SAFETY GUARD RAIL: Exit early if database tables are empty to avoid loops crashing
     if not tasks and not commitments:
         return []
         
-    free_slots = []
     for comm in commitments:
         try:
             c_start = datetime.strptime(comm['start_time'], "%Y-%m-%dT%H:%M")
             c_end = datetime.strptime(comm['end_time'], "%Y-%m-%dT%H:%M")
-            if c_start > current_timeline:
-                free_slots.append({"start": current_timeline, "end": c_start})
-            current_timeline = max(current_timeline, c_end)
+            
+            t_buffer = comm['travel_time'] if 'travel_time' in comm.keys() else 0
+            
+            arrival_buffer_start = c_start - timedelta(minutes=t_buffer)
+            departure_buffer_end = c_end + timedelta(minutes=t_buffer)
+
+            if arrival_buffer_start > current_timeline:
+                free_slots.append({"start": current_timeline, "end": arrival_buffer_start})
+                
+            current_timeline = max(current_timeline, departure_buffer_end)
         except Exception:
             pass
 
     if current_timeline < end_of_day:
         free_slots.append({"start": current_timeline, "end": end_of_day})
         
-    MIN_CHUNK = 30
-    schedule_timeline = []
+    # =======================================================================
+    # STEP 2: Automated Routine Injection Layer
+    # =======================================================================
+    period_bounds = {
+        'morning': (wake_hour, 12),
+        'afternoon': (12, 17),
+        'evening': (17, 23)
+    }
+
+    adjusted_free_slots = []
     
+    for slot in free_slots:
+        slot_start = slot["start"]
+        slot_end = slot["end"]
+        
+        for t in tasks[:]:
+            if t.get('preferred_period') and ('Routine' in t['title'] or '🧼' in t['title'] or '🍳' in t['title']):
+                start_h, end_h = period_bounds.get(t['preferred_period'], (wake_hour, 12))
+                
+                if start_h <= slot_start.hour < end_h:
+                    slot_capacity = int((slot_end - slot_start).total_seconds() / 60)
+                    
+                    if slot_capacity >= t['duration']:
+                        schedule_timeline.append({
+                            "title": t['title'],
+                            "start": slot_start.strftime("%H:%M"),
+                            "end": (slot_start + timedelta(minutes=t['duration'])).strftime("%H:%M"),
+                            "type": "routine",
+                            "score": "Fixed Routine"
+                        })
+                        slot_start += timedelta(minutes=t['duration'])
+                        tasks.remove(t)
+                        
+        if slot_start < slot_end:
+            adjusted_free_slots.append({"start": slot_start, "end": slot_end})
+            
+    free_slots = adjusted_free_slots
+
+    MIN_CHUNK = 30
+        
     for slot in free_slots:
         slot_start = slot["start"]
         slot_end = slot["end"]
@@ -237,21 +310,56 @@ def is_authenticated():
 def index():
     if not is_authenticated():
         return redirect(url_for('login'))
+        
     db = get_db()
     current_user = session['user_id']
-    profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (session['user_id'],)).fetchone()
     
+    profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (current_user,)).fetchone()
     if not profile:
         session.clear()
         return redirect(url_for('login'))
         
-    timeline = run_scheduling_engine(session['user_id'])
     all_tasks = db.execute(
-        "SELECT * FROM tasks WHERE is_completed = 0 AND user_id = ?", 
-        (current_user,)
+        "SELECT * FROM tasks WHERE is_completed = 0 AND user_id = ?", (current_user,)
     ).fetchall()
     
+    timeline = run_scheduling_engine(current_user)
     return render_template('scheduler.html', timeline=timeline, profile=profile, tasks=all_tasks)
+
+# 🛠️ ROUTE CONFLICT RESOLVED: Consolidated everything into one secure endpoint
+@app.route('/tasks', methods=['GET', 'POST'])
+def manage_tasks():
+    if not is_authenticated(): 
+        return redirect(url_for('login'))
+        
+    db = get_db()
+    current_user = session['user_id']
+    
+    if request.method == 'POST':
+        parent = request.form.get('parent_id')
+        parent_val = int(parent) if parent and parent.strip() else None
+        
+        title = request.form['title']
+        priority = int(request.form['priority'])
+        urgency = int(request.form['urgency'])
+        difficulty = int(request.form['difficulty'])
+        duration = int(request.form['duration'])
+        due_date = request.form.get('due_date') or None
+        
+        preferred_period = request.form.get('preferred_period') or "morning"
+
+        db.execute(
+            """
+            INSERT INTO tasks (user_id, parent_id, title, priority, urgency, difficulty, duration, preferred_period, due_date, is_completed) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            """,
+            (current_user, parent_val, title, priority, urgency, difficulty, duration, preferred_period, due_date)
+        )
+        db.commit()
+        return redirect(url_for('manage_tasks'))
+        
+    all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0 AND user_id = ? ORDER BY id DESC", (current_user,)).fetchall()
+    return render_template('tasks.html', tasks=all_tasks)
 
 @app.route('/calendar')
 def calendar_view():
@@ -259,14 +367,49 @@ def calendar_view():
         return redirect(url_for('login'))
     return render_template('calendar.html')
 
+@app.route('/routines', methods=['GET', 'POST'])
+def manage_routines():
+    if not is_authenticated(): 
+        return redirect(url_for('login'))
+        
+    db = get_db()
+    current_user = session['user_id']
+    
+    if request.method == 'POST':
+        title = request.form['title']
+        duration = int(request.form['duration'])
+        preferred_period = request.form['preferred_period']
+        
+        db.execute(
+            "INSERT INTO user_routines (user_id, title, duration, preferred_period) VALUES (?, ?, ?, ?)",
+            (current_user, title, duration, preferred_period)
+        )
+        db.commit()
+        return redirect(url_for('manage_routines'))
+        
+    routines = db.execute("SELECT * FROM user_routines WHERE user_id = ?", (current_user,)).fetchall()
+    return render_template('routines.html', routines=routines)
+
+@app.route('/routines/delete/<int:routine_id>', methods=['POST'])
+def delete_routine(routine_id):
+    if not is_authenticated(): 
+        return redirect(url_for('login'))
+    db = get_db()
+    db.execute("DELETE FROM user_routines WHERE id = ? AND user_id = ?", (routine_id, session['user_id']))
+    db.commit()
+    return redirect(url_for('manage_routines'))
+
 @app.route('/api/calendar-events')
 def calendar_events():
     if not is_authenticated():
         return jsonify({"error": "Unauthorized"}), 401
     db = get_db()
+    current_user = session['user_id']
     events = []
     
-    commitments = db.execute("SELECT * FROM commitments").fetchall()
+    commitments = db.execute(
+        "SELECT * FROM commitments WHERE user_id = ? ORDER BY start_time ASC", (current_user,)
+    ).fetchall()
     for c in commitments:
         events.append({
             "title": f"🔒 {c['title']}",
@@ -276,7 +419,7 @@ def calendar_events():
             "borderColor": "#334155"
         })
         
-    tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
+    tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0 AND user_id = ?", (current_user,)).fetchall()
     for t in tasks:
         if t['due_date']:
             events.append({
@@ -316,6 +459,9 @@ def signup():
         user_id = cursor.lastrowid
         db.commit()
         
+        # Seed default 24hr energy matrices mapping explicitly to this new user
+        seed_default_energy(user_id)
+        
         session['user_id'] = user_id
         return redirect(url_for('index'))
     return render_template('signup.html')
@@ -325,7 +471,7 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-@app.route('/profile')
+@app.route('/profile', methods=['GET', 'POST'])
 def profile():
     if not is_authenticated():
         return redirect(url_for('login'))
@@ -333,18 +479,33 @@ def profile():
     db = get_db()
     current_user = session['user_id']
     
-    # Fetch the logged-in user's profile details from the database
-    profile_data = db.execute("SELECT * FROM user_profile WHERE id = ?", (current_user,)).fetchone()
+    if request.method == 'POST':
+        new_name = request.form['name']
+        new_age = request.form['age']
+        new_occupation = request.form['occupation']
+        new_wake_time = request.form['wake_time']
+        
+        db.execute(
+            """
+            UPDATE user_profile 
+            SET name = ?, age = ?, occupation = ?, wake_time = ? 
+            WHERE id = ?
+            """,
+            (new_name, int(new_age) if new_age else None, new_occupation, new_wake_time, current_user)
+        )
+        db.commit()
+        flash("Profile configurations updated successfully!", "success")
+        return redirect(url_for('profile'))
+        
+    profile_data = db.execute(
+        "SELECT id, name, age, occupation, wake_time, email FROM user_profile WHERE id = ?", (current_user,)
+    ).fetchone()
     
-    # If no profile record exists yet, create an empty dictionary structure so the HTML doesn't crash
     if not profile_data:
-        profile_data = {'name': 'Authenticated Profile', 'email': ''}
+        session.clear()
+        return redirect(url_for('login'))
         
     return render_template('profile.html', profile=profile_data)
-
-# ==========================================
-# TASK ACTIONS: UPDATE, DELETE, COMPLETE
-# ==========================================
 
 @app.route('/tasks/delete/<int:task_id>', methods=['POST'])
 def delete_task(task_id):
@@ -356,65 +517,15 @@ def delete_task(task_id):
     db.commit()
     return redirect(url_for('manage_tasks'))
 
-
-# ==========================================
-# COMMITMENT ACTIONS: DELETE/UPDATE
-# ==========================================
-
 @app.route('/commitments/delete/<int:commitment_id>', methods=['POST'])
 def delete_commitment(commitment_id):
     if not is_authenticated():
         return redirect(url_for('login'))
     
     db = get_db()
-    # Cascading cleanup: If deleting a main event, also drop its child travel block
-    db.execute(
-        """
-        DELETE FROM commitments 
-        WHERE (id = ? OR parent_commitment_id = ?) AND user_id = ?
-        """, 
-        (commitment_id, commitment_id, session['user_id'])
-    )
+    db.execute("DELETE FROM commitments WHERE id = ? AND user_id = ?", (commitment_id, session['user_id']))
     db.commit()
     return redirect(url_for('manage_commitments'))
-
-@app.route('/tasks', methods=['GET', 'POST'])
-def manage_tasks():
-    if not is_authenticated(): 
-        return redirect(url_for('login'))
-        
-    db = get_db()
-    
-    if request.method == 'POST':
-        parent = request.form.get('parent_id')
-        parent_val = int(parent) if parent and parent.strip() else None
-        
-        # 1. Grab the active user's session identifier
-        current_user = session.get('user_id')
-        
-        # 2. Inject user_id into the constraint tracking schema layout
-        db.execute(
-            """
-            INSERT INTO tasks (user_id, parent_id, title, priority, urgency, difficulty, duration, due_date) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                current_user, 
-                parent_val, 
-                request.form['title'], 
-                int(request.form['priority']), 
-                int(request.form['urgency']), 
-                int(request.form['difficulty']), 
-                int(request.form['duration']), 
-                request.form['due_date']
-            )
-        )
-        db.commit()
-        return redirect(url_for('manage_tasks'))
-        
-    # GET Request logic remains clean
-    all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0 AND user_id = ? ORDER BY id DESC", (session['user_id'],)).fetchall()
-    return render_template('tasks.html', tasks=all_tasks)
 
 @app.route('/commitments', methods=['GET', 'POST'])
 def manage_commitments():
@@ -422,69 +533,51 @@ def manage_commitments():
         return redirect(url_for('login'))
         
     db = get_db()
-    current_user = session.get('user_id')
+    current_user = session['user_id']
     
     if request.method == 'POST':
         title = request.form['title']
         start_str = request.form['start_time']
         end_str = request.form['end_time']
-        travel_duration = int(request.form.get('travel_time', 0)) # in minutes
+        travel_time = request.form.get('travel_time', 0)
+        travel_time = int(travel_time) if travel_time else 0
         
-        # 1. Insert the main event commitment block
-        cursor = db.execute(
+        db.execute(
             """
-            INSERT INTO commitments (user_id, title, start_time, end_time, is_travel_block) 
-            VALUES (?, ?, ?, ?, 0)
+            INSERT INTO commitments (user_id, title, start_time, end_time, travel_time) 
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (current_user, title, start_str, end_str)
+            (current_user, title, start_str, end_str, travel_time)
         )
-        main_event_id = cursor.lastrowid
-        
-        # 2. Automatically account for travel time if requested
-        if travel_duration > 0:
-            event_start = datetime.strptime(start_str, "%Y-%m-%dT%H:%M")
-            
-            # Calculate commute window right before the event starts
-            travel_start = event_start - timedelta(minutes=travel_duration)
-            travel_end = event_start
-            
-            db.execute(
-                """
-                INSERT INTO commitments (user_id, title, start_time, end_time, parent_commitment_id, is_travel_block) 
-                VALUES (?, ?, ?, ?, ?, 1)
-                """,
-                (
-                    current_user,
-                    f"🚗 Commute: {title}",
-                    travel_start.strftime("%Y-%m-%dT%H:%M"),
-                    travel_end.strftime("%Y-%m-%dT%H:%M"),
-                    main_event_id
-                )
-            )
-            
         db.commit()
         return redirect(url_for('manage_commitments'))
         
-    # GET Request logic remains exactly the same
     commitments = db.execute(
-        "SELECT * FROM commitments WHERE user_id = ? ORDER BY start_time ASC", 
-        (current_user,)
+        "SELECT * FROM commitments WHERE user_id = ? ORDER BY start_time ASC", (current_user,)
     ).fetchall()
-    
     return render_template('commitments.html', commitments=commitments)
         
 @app.route('/energy', methods=['GET', 'POST'])
 def manage_energy():
     if not is_authenticated(): return redirect(url_for('login'))
     db = get_db()
+    current_user = session['user_id']
+    
     if request.method == 'POST':
         for hour in range(0, 24):
             field_name = f"energy_{hour}"
             if field_name in request.form:
-                db.execute("UPDATE user_energy SET energy_level = ? WHERE hour = ?", (request.form[field_name], hour))
+                db.execute(
+                    """
+                    UPDATE user_energy SET energy_level = ? 
+                    WHERE hour = ? AND user_id = ?
+                    """, 
+                    (request.form[field_name], hour, current_user)
+                )
         db.commit()
         return redirect(url_for('index'))
-    energy_levels = db.execute("SELECT * FROM user_energy ORDER BY hour ASC").fetchall()
+        
+    energy_levels = db.execute("SELECT * FROM user_energy WHERE user_id = ? ORDER BY hour ASC", (current_user,)).fetchall()
     return render_template('energy.html', energy_levels=energy_levels)
 
 @app.route('/tasks/complete/<int:task_id>', methods=['POST'])
@@ -501,7 +594,7 @@ def complete_task(task_id):
 def clear_commitments():
     if not is_authenticated(): return redirect(url_for('login'))
     db = get_db()
-    db.execute("DELETE FROM commitments")
+    db.execute("DELETE FROM commitments WHERE user_id = ?", (session['user_id'],))
     db.commit()
     return redirect(url_for('index'))
 

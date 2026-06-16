@@ -312,32 +312,75 @@ def logout():
 
 @app.route('/tasks', methods=['GET', 'POST'])
 def manage_tasks():
-    if not is_authenticated(): return redirect(url_for('login'))
+    if not is_authenticated(): 
+        return redirect(url_for('login'))
+        
     db = get_db()
+    
     if request.method == 'POST':
         parent = request.form.get('parent_id')
         parent_val = int(parent) if parent and parent.strip() else None
+        
+        # 1. Grab the active user's session identifier
+        current_user = session.get('user_id')
+        
+        # 2. Inject user_id into the constraint tracking schema layout
         db.execute(
-            "INSERT INTO tasks (parent_id, title, priority, urgency, difficulty, duration, due_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (parent_val, request.form['title'], request.form['priority'], request.form['urgency'], request.form['difficulty'], request.form['duration'], request.form['due_date'])
+            """
+            INSERT INTO tasks (user_id, parent_id, title, priority, urgency, difficulty, duration, due_date) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                current_user, 
+                parent_val, 
+                request.form['title'], 
+                int(request.form['priority']), 
+                int(request.form['urgency']), 
+                int(request.form['difficulty']), 
+                int(request.form['duration']), 
+                request.form['due_date']
+            )
         )
         db.commit()
         return redirect(url_for('manage_tasks'))
-    all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0 ORDER BY id DESC").fetchall()
-    return render_template('tasks.html', tasks=all_tasks)       
+        
+    # GET Request logic remains clean
+    all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0 AND user_id = ? ORDER BY id DESC", (session['user_id'],)).fetchall()
+    return render_template('tasks.html', tasks=all_tasks)
 
 @app.route('/commitments', methods=['GET', 'POST'])
 def manage_commitments():
-    if not is_authenticated():
+    if not is_authenticated(): 
         return redirect(url_for('login'))
+        
     db = get_db()
+    current_user = session.get('user_id')
+    
     if request.method == 'POST':
-        db.execute("INSERT INTO commitments (title, start_time, end_time) VALUES (?, ?, ?)",
-                   (request.form['title'], request.form['start_time'], request.form['end_time']))
+        db.execute(
+            """
+            INSERT INTO commitments (user_id, title, start_time, end_time) 
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                current_user,
+                request.form['title'],
+                request.form['start_time'],
+                request.form['end_time']
+            )
+        )
         db.commit()
+        # After saving, reload THIS SAME page so they see their updated list
         return redirect(url_for('manage_commitments'))
-    commitments = db.execute("SELECT * FROM commitments ORDER BY start_time ASC").fetchall()
-    return render_template('commitments.html', commitments=commitments)
+        
+    # GET Request: Fetch all fixed commitments belonging to this user
+    all_commitments = db.execute(
+        "SELECT * FROM commitments WHERE user_id = ? ORDER BY start_time ASC", 
+        (current_user,)
+    ).fetchall()
+    
+    # Render the commitments.html page and pass the data into it
+    return render_template('commitments.html', commitments=all_commitments)
 
 @app.route('/profile', methods=['GET', 'POST'])
 def profile_settings():

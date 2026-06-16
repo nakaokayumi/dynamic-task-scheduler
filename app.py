@@ -83,7 +83,7 @@ def init_db():
             conn.executemany("INSERT INTO user_energy (hour, energy_level) VALUES (?, ?)", default_profile)
         conn.commit()
 
-def run_scheduling_engine():
+def run_scheduling_engine(user_id):
     db = get_db()
     raw_tasks = db.execute('''
         SELECT t.* FROM tasks t 
@@ -97,7 +97,8 @@ def run_scheduling_engine():
     raw_energy = db.execute("SELECT * FROM user_energy").fetchall()
     energy_map = {row['hour']: row['energy_level'] for row in raw_energy}
     
-    profile = db.execute("SELECT * FROM user_profile LIMIT 1").fetchone()
+    # Secure fix: Scope profile data directly to active user session
+    profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (user_id,)).fetchone()
     wake_hour = 6
     if profile and profile['wake_time']:
         try:
@@ -111,11 +112,15 @@ def run_scheduling_engine():
     
     free_slots = []
     for comm in commitments:
-        c_start = datetime.strptime(comm['start_time'], "%Y-%m-%dT%H:%M")
-        c_end = datetime.strptime(comm['end_time'], "%Y-%m-%dT%H:%M")
-        if c_start > current_timeline:
-            free_slots.append({"start": current_timeline, "end": c_start})
-        current_timeline = max(current_timeline, c_end)
+        try:
+            c_start = datetime.strptime(comm['start_time'], "%Y-%m-%dT%H:%M")
+            c_end = datetime.strptime(comm['end_time'], "%Y-%m-%dT%H:%M")
+            if c_start > current_timeline:
+                free_slots.append({"start": current_timeline, "end": c_start})
+            current_timeline = max(current_timeline, c_end)
+        except Exception:
+            pass
+
     if current_timeline < end_of_day:
         free_slots.append({"start": current_timeline, "end": end_of_day})
         
@@ -194,15 +199,18 @@ def run_scheduling_engine():
                 slot_capacity = 0
                 
     for comm in commitments:
-        c_start = datetime.strptime(comm['start_time'], "%Y-%m-%dT%H:%M")
-        c_end = datetime.strptime(comm['end_time'], "%Y-%m-%dT%H:%M")
-        schedule_timeline.append({
-            "title": comm['title'],
-            "start": c_start.strftime("%H:%M"),
-            "end": c_end.strftime("%H:%M"),
-            "type": "commitment",
-            "score": "N/A"
-        })
+        try:
+            c_start = datetime.strptime(comm['start_time'], "%Y-%m-%dT%H:%M")
+            c_end = datetime.strptime(comm['end_time'], "%Y-%m-%dT%H:%M")
+            schedule_timeline.append({
+                "title": comm['title'],
+                "start": c_start.strftime("%H:%M"),
+                "end": c_end.strftime("%H:%M"),
+                "type": "commitment",
+                "score": "N/A"
+            })
+        except Exception:
+            pass
         
     schedule_timeline.sort(key=lambda x: x['start'])
     return schedule_timeline
@@ -214,13 +222,18 @@ def is_authenticated():
 @app.route('/')
 def index():
     if not is_authenticated():
-        return redirect(url_for('signup'))
+        return redirect(url_for('login'))
     db = get_db()
-    profile = db.execute("SELECT * FROM user_profile LIMIT 1").fetchone()
-    timeline = run_scheduling_engine()
+    profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (session['user_id'],)).fetchone()
     
-    # FORCED COMPLIANCE: Directing root view right back to your preferred original filename
-    return render_template('scheduler.html', timeline=timeline, profile=profile)
+    if not profile:
+        session.clear()
+        return redirect(url_for('login'))
+        
+    timeline = run_scheduling_engine(session['user_id'])
+    all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
+    
+    return render_template('scheduler.html', timeline=timeline, profile=profile, tasks=all_tasks)
 
 @app.route('/calendar')
 def calendar_view():
@@ -271,6 +284,7 @@ def login():
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
+    if is_authenticated(): return redirect(url_for('index'))
     if request.method == 'POST':
         db = get_db()
         if db.execute("SELECT 1 FROM user_profile WHERE email = ?", (request.form['email'],)).fetchone():
@@ -280,7 +294,11 @@ def signup():
         db.execute("INSERT INTO user_profile (name, age, occupation, wake_time, email, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
                    (request.form['name'], request.form['age'], request.form['occupation'], request.form['wake_time'], request.form['email'], hashed_pw))
         db.commit()
-        return redirect(url_for('login'))
+        
+        # Pull newly created record to set up clean session straight away
+        new_user = db.execute("SELECT id FROM user_profile WHERE email = ?", (request.form['email'],)).fetchone()
+        session['user_id'] = new_user['id']
+        return redirect(url_for('index'))
     return render_template('signup.html')
 
 @app.route('/logout')
@@ -300,7 +318,7 @@ def manage_tasks():
             (request.form['title'], request.form['priority'], request.form['urgency'], request.form['difficulty'], request.form['duration'], request.form['due_date'], parent_val)
         )
         db.commit()
-        return redirect(url_for('index')) # Redirect back to the dashboard layout loop
+        return redirect(url_for('index'))
         
     all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
     return render_template('scheduler.html', tasks=all_tasks)

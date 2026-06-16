@@ -358,6 +358,39 @@ def clear_commitments():
     db.commit()
     return redirect(url_for('manage_commitments'))
 
+@app.route('/api/calendar-events')
+def calendar_events():
+    if not is_authenticated():
+        return {"error": "Unauthorized"}, 401
+        
+    db = get_db()
+    events = []
+    
+    # 1. Pull Rigid Commitments
+    commitments = db.execute("SELECT * FROM commitments").fetchall()
+    for c in commitments:
+        events.append({
+            "title": f"🔒 {c['title']}",
+            "start": c['start_time'], # e.g., "2026-06-16T12:00"
+            "end": c['end_time'],
+            "backgroundColor": "#1e293b", # Dark slate for commitments
+            "borderColor": "#334155"
+        })
+        
+    # 2. Pull Tasks with Due Dates
+    tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0").fetchall()
+    for t in tasks:
+        if t['due_date']:
+            events.append({
+                "title": f"🎯 {t['title']} (Due)",
+                "start": t['due_date'], # e.g., "2026-06-16"
+                "allDay": True,
+                "backgroundColor": "#7c3aed", # Purple for tasks
+                "borderColor": "#6d28d9"
+            })
+            
+    return jsonify(events)
+
 # Force database init immediately upon file loading
 init_db()
 

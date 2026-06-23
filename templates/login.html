@@ -15,8 +15,8 @@
         <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-sky-500 to-purple-500"></div>
         
         <header class="text-center mb-8">
-            <h1 class="text-2xl font-black text-white tracking-tight">Identity Authentication</h1>
-            <p class="text-slate-400 text-xs mt-1">Provide credentials to decrypt scheduling portal session.</p>
+            <h1 class="text-2xl font-black text-white tracking-tight">Login</h1>
+            <p class="text-slate-400 text-xs mt-1">Enter your details to access your schedule</p>
         </header>
 
         <form method="POST" class="space-y-5 text-sm">
@@ -27,18 +27,18 @@
             </div>
             
             <div>
-                <label class="block text-slate-400 font-medium mb-1.5">Secret Password</label>
+                <label class="block text-slate-400 font-medium mb-1.5">Password</label>
                 <input type="password" name="password" required placeholder="••••••••"
                        class="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white focus:outline-none focus:border-sky-500 transition">
             </div>
 
             <button type="submit" class="w-full bg-gradient-to-r from-sky-600 to-sky-500 hover:from-sky-500 hover:to-sky-400 text-white font-bold py-3 rounded-xl mt-4 transition shadow-lg shadow-sky-950/40 cursor-pointer">
-                Verify Credentials
+                Log In
             </button>
         </form>
         
         <footer class="mt-6 text-center text-xs text-slate-500">
-            New user? <a href="{{ url_for('signup') }}" class="text-sky-400 hover:underline">Register identity profile</a>
+            New user? <a href="{{ url_for('signup') }}" class="text-sky-400 hover:underline">Sign Up Here</a>
         </footer>
     </div>
 </div>

@@ -15,8 +15,8 @@
         <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500 to-emerald-500"></div>
         
         <header class="text-center mb-6">
-            <h1 class="text-2xl font-black text-white tracking-tight">Register System Identity</h1>
-            <p class="text-slate-400 text-xs mt-1">Configure secure credentials and daily timeline constraints.</p>
+            <h1 class="text-2xl font-black text-white tracking-tight">Create an Account</h1>
+            <p class="text-slate-400 text-xs mt-1">Set up your profile and daily waking hours</p>
         </header>
 
         <form method="POST" class="space-y-4 text-sm">
@@ -33,7 +33,7 @@
                            class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-purple-500 transition">
                 </div>
                 <div>
-                    <label class="block text-slate-400 font-medium mb-1">Daily Wake Time</label>
+                    <label class="block text-slate-400 font-medium mb-1">Waking Up At</label>
                     <input type="time" name="wake_time" value="06:00" required
                            class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-emerald-400 font-mono font-bold focus:outline-none focus:border-purple-500 transition">
                 </div>
@@ -47,20 +47,20 @@
 
             <div class="border-t border-slate-800/80 my-4 pt-4 space-y-4">
                 <div>
-                    <label class="block text-slate-400 font-medium mb-1">Account Email</label>
+                    <label class="block text-slate-400 font-medium mb-1">Email</label>
                     <input type="email" name="email" required placeholder="name@domain.com"
                            class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-purple-500 transition">
                 </div>
                 
                 <div>
-                    <label class="block text-slate-400 font-medium mb-1">Account Password</label>
+                    <label class="block text-slate-400 font-medium mb-1">Password</label>
                     <input type="password" name="password" required placeholder="••••••••"
                            class="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-purple-500 transition">
                 </div>
             </div>
 
             <button type="submit" class="w-full bg-gradient-to-r from-purple-600 to-emerald-600 hover:from-purple-500 hover:to-emerald-500 text-white font-bold py-3 rounded-xl mt-2 transition shadow-lg cursor-pointer">
-                Initialize Secure Account
+                Create Account
             </button>
         </form>
         

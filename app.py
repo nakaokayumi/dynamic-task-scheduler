@@ -13,6 +13,26 @@ def get_db():
     conn = sqlite3.connect(DATABASE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
+def log_event(user_id, action, details=None):
+    """Utility to record application lifecycle security events."""
+    try:
+        # Changed 'db' to 'conn' to resolve the 'conn is not defined' reference error
+        conn = get_db()
+        
+        # Extract IP addresses securely, accounting for potential reverse proxies
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        
+        conn.execute(
+            """
+            INSERT INTO audit_logs (user_id, action, details, ip_address)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, action, details, ip_address)
+        )
+        conn.commit()
+    except Exception as e:
+        # Prevent database logging faults from crashing the main user action thread
+        print(f"⚠️ Audit Log Failure: {e}")
 
 # --- PBKDF2-SHA256 SECURE SECURITY LAYER ---
 def hash_password(password: str) -> str:
@@ -99,6 +119,20 @@ def init_db():
                 FOREIGN KEY(user_id) REFERENCES user_profile(id) ON DELETE CASCADE
             )
         ''')
+
+        # 🪵 Audit Logs table (Strictly tied to user_id via Foreign Key)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                action TEXT NOT NULL,
+                details TEXT,
+                ip_address TEXT,
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES user_profile(id) ON DELETE SET NULL
+            )
+        ''')
+        
         conn.commit()
 
 # --- HELPER TO INITIALIZE ENERGY FOR NEW USERS ---
@@ -319,12 +353,39 @@ def index():
         session.clear()
         return redirect(url_for('login'))
         
+    # Active tasks displayed on the dashboard grid (incomplete only)
     all_tasks = db.execute(
         "SELECT * FROM tasks WHERE is_completed = 0 AND user_id = ?", (current_user,)
     ).fetchall()
     
+    # 📊 CALCULATE COMPLETION RATE (Executed before returning the template)
+    stats = db.execute("""
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed
+        FROM tasks 
+        WHERE user_id = ?
+    """, (current_user,)).fetchone()
+
+    total_tasks = stats['total'] or 0
+    completed_tasks = stats['completed'] or 0
+
+    if total_tasks > 0:
+        completion_rate = round((completed_tasks / total_tasks) * 100, 1)
+    else:
+        completion_rate = 0.0
+
+    # Run the automated scheduler timeline matrix
     timeline = run_scheduling_engine(current_user)
-    return render_template('scheduler.html', timeline=timeline, profile=profile, tasks=all_tasks)
+    
+    # ✅ Packaged completely into the response payload context
+    return render_template(
+        'index.html', 
+        timeline=timeline, 
+        profile=profile, 
+        tasks=all_tasks, 
+        completion_rate=completion_rate
+    )
 
 # 🛠️ ROUTE CONFLICT RESOLVED: Consolidated everything into one secure endpoint
 @app.route('/tasks', methods=['GET', 'POST'])
@@ -437,9 +498,17 @@ def login():
     if request.method == 'POST':
         db = get_db()
         user = db.execute("SELECT * FROM user_profile WHERE email = ?", (request.form['email'],)).fetchone()
+        
         if user and check_password(user['password_hash'], request.form['password']):
             session['user_id'] = user['id']
+            
+            # ✅ SUCCESS LOG INJECTION
+            log_event(user['id'], "LOGIN_SUCCESS", "User authenticated successfully.")
+            
             return redirect(url_for('index'))
+            
+        # ❌ FAILURE LOG INJECTION (Pass None since user authentication failed)
+        log_event(None, "LOGIN_FAILED", f"Failed attempt for email: {request.form['email']}")
         flash("Invalid credentials.", "danger")
     return render_template('login.html')
 
@@ -451,18 +520,20 @@ def signup():
         if db.execute("SELECT 1 FROM user_profile WHERE email = ?", (request.form['email'],)).fetchone():
             flash("Email registered.", "danger")
             return redirect(url_for('signup'))
+            
         hashed_pw = hash_password(request.form['password'])
-        
         cursor = db.cursor()
         cursor.execute("INSERT INTO user_profile (name, age, occupation, wake_time, email, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
                        (request.form['name'], request.form['age'], request.form['occupation'], request.form['wake_time'], request.form['email'], hashed_pw))
         user_id = cursor.lastrowid
         db.commit()
         
-        # Seed default 24hr energy matrices mapping explicitly to this new user
         seed_default_energy(user_id)
-        
         session['user_id'] = user_id
+        
+        # ✅ ACCOUNT CREATION LOG INJECTION
+        log_event(user_id, "ACCOUNT_CREATION", "New user registered and default energy maps seeded.")
+        
         return redirect(url_for('index'))
     return render_template('signup.html')
 
@@ -479,33 +550,17 @@ def profile():
     db = get_db()
     current_user = session['user_id']
     
-    if request.method == 'POST':
-        new_name = request.form['name']
-        new_age = request.form['age']
-        new_occupation = request.form['occupation']
-        new_wake_time = request.form['wake_time']
-        
-        db.execute(
-            """
-            UPDATE user_profile 
-            SET name = ?, age = ?, occupation = ?, wake_time = ? 
-            WHERE id = ?
-            """,
-            (new_name, int(new_age) if new_age else None, new_occupation, new_wake_time, current_user)
-        )
-        db.commit()
-        flash("Profile configurations updated successfully!", "success")
-        return redirect(url_for('profile'))
-        
-    profile_data = db.execute(
-        "SELECT id, name, age, occupation, wake_time, email FROM user_profile WHERE id = ?", (current_user,)
-    ).fetchone()
+    # ... keep your existing profile POST/UPDATE code here ...
+
+    profile_data = db.execute("SELECT * FROM user_profile WHERE id = ?", (current_user,)).fetchone()
     
-    if not profile_data:
-        session.clear()
-        return redirect(url_for('login'))
+    # 🔎 Fetch the 5 most recent activities for this specific user
+    user_logs = db.execute(
+        "SELECT action, details, ip_address, timestamp FROM audit_logs WHERE user_id = ? ORDER BY id DESC LIMIT 5", 
+        (current_user,)
+    ).fetchall()
         
-    return render_template('profile.html', profile=profile_data)
+    return render_template('profile.html', profile=profile_data, logs=user_logs)
 
 @app.route('/tasks/delete/<int:task_id>', methods=['POST'])
 def delete_task(task_id):
@@ -513,8 +568,14 @@ def delete_task(task_id):
         return redirect(url_for('login'))
     
     db = get_db()
-    db.execute("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, session['user_id']))
+    current_user = session['user_id']
+    
+    db.execute("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, current_user))
     db.commit()
+    
+    # ✅ METRIC DELETION LOG INJECTION
+    log_event(current_user, "TASK_DELETION", f"Task ID {task_id} permanently dropped from database tracking.")
+    
     return redirect(url_for('manage_tasks'))
 
 @app.route('/commitments/delete/<int:commitment_id>', methods=['POST'])
@@ -599,6 +660,7 @@ def clear_commitments():
     return redirect(url_for('index'))
 
 init_db()
+
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

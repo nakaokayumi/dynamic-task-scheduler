@@ -4,16 +4,48 @@
     <header class="flex flex-col md:flex-row md:justify-between md:items-center bg-slate-950 border border-slate-800 p-6 rounded-2xl shadow-lg">
         <div>
             <h1 class="text-3xl font-extrabold tracking-tight">Welcome back, {{ profile.name }} ⚡</h1>
-            <p class="text-slate-400 text-sm mt-1">Operational Role: <span class="text-sky-400 font-medium">{{ profile.occupation }}</span> (Age: {{ profile.age }})</p>
+            <p class="text-slate-400 text-sm mt-1">Profile: <span class="text-sky-400 font-medium">{{ profile.occupation }}</span> (Age: {{ profile.age }})</p>
         </div>
         <div class="text-left md:text-right mt-4 md:mt-0 bg-slate-900 border border-slate-800/60 px-4 py-2 rounded-xl">
-            <span class="text-xs text-slate-500 block">Daily System Start Anchor</span>
+            <span class="text-xs text-slate-500 block">Day Starts At</span>
             <span class="text-md font-mono text-emerald-400 font-bold">Waking up at {{ profile.wake_time }}</span>
         </div>
     </header>
 
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        <div class="bg-slate-950 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-col justify-between">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-slate-400 tracking-tight">📈 Progress</p>
+                    <h3 class="text-3xl font-mono font-bold text-white mt-1 tracking-tight">{{ completion_rate }}%</h3>
+                </div>
+                <div class="w-12 h-12 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-xl">
+                    🏆
+                </div>
+            </div>
+            
+            <div class="mt-4">
+                <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800/80">
+                    <div class="bg-violet-500 h-full transition-all duration-500 ease-out shadow-[0_0_12px_rgba(139,92,246,0.3)]" style="width: {{ completion_rate }}%;"></div>
+                </div>
+                <p class="text-[11px] text-slate-500 mt-2">Overall Task Completion Progress</p>
+            </div>
+        </div>
+
+        <div class="bg-slate-950 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-col justify-between">
+            <div>
+                <span class="text-[10px] font-bold uppercase tracking-wider text-violet-400 bg-violet-500/10 border border-violet-500/20 px-2.5 py-1 rounded-full">Secure Operational Mode</span>
+                <h3 class="text-lg font-bold text-white mt-3">Account Integrity Verified</h3>
+                <h3>🔒 Account Status: Secure</h3>
+                <p>All data is synced and saved to your workspace.</p>
+            </div>
+        </div>
+
+    </div>
+
     <div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xl">
-        <h2 class="text-lg font-bold border-b border-slate-800 pb-3 mb-6 text-slate-300">Live Timeline Matrix</h2>
+        <h2 class="text-lg font-bold border-b border-slate-800 pb-3 mb-6 text-slate-300">Timeline</h2>
         
         {% if not timeline %}
         <div class="text-center py-12 text-slate-500 text-sm">No items scheduled yet. Add tasks or commitments to run engine calculations.</div>

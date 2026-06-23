@@ -3,7 +3,7 @@
 <div class="max-w-7xl mx-auto px-4 py-8">
     
     <div class="mb-10">
-        <h1 class="text-2xl md:text-3xl font-extrabold text-white tracking-tight">System Tasks Control Queue</h1>
+        <h1 class="text-2xl md:text-3xl font-extrabold text-white tracking-tight">🎯 Tasks</h1>
         <p class="text-sm text-slate-400 mt-1">Review, append, and filter active schedule objectives</p>
     </div>
 
@@ -11,7 +11,7 @@
         
         <div class="lg:col-span-5">
             <div class="bg-[#030712] border border-slate-900 rounded-3xl p-6 md:p-8 shadow-2xl">
-                <h2 class="text-xl font-extrabold text-white tracking-tight mb-6">Ingest Target Task</h2>
+                <h2 class="text-xl font-extrabold text-white tracking-tight mb-6">Add Task</h2>
                 
                 <form action="{{ url_for('manage_tasks') }}" method="POST" class="space-y-5">
                     <div class="flex flex-col">
@@ -21,9 +21,9 @@
                     </div>
 
                     <div class="flex flex-col">
-                        <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Prerequisite Target (Optional)</label>
+                        <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Are There Any Unfinished Tasks To Be Done Before This? (Optional)</label>
                         <select name="parent_id" class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-sm text-slate-300 outline-none focus:border-blue-500 transition shadow-inner">
-                            <option value="">-- No Structural Prerequisite --</option>
+                            <option value="">-- None --</option>
                             {% if tasks %}
                                 {% for t in tasks %}
                                 <option value="{{ t['id'] }}">Block until: {{ t['title'] }}</option>
@@ -78,7 +78,7 @@
                     </div>
 
                     <button type="submit" class="w-full bg-[#0084d1] hover:bg-[#0074b8] text-white font-bold py-4 px-4 rounded-xl tracking-wide transition duration-150 transform-gpu active:scale-[0.99] mt-4 shadow-lg">
-                        Inject into Matrix
+                        Add Task
                     </button>
                 </form>
             </div>
@@ -86,13 +86,13 @@
 
         <div class="lg:col-span-7">
             <div class="bg-[#030712] border border-slate-900 rounded-3xl p-6 md:p-8 shadow-2xl min-h-[400px]">
-                <h2 class="text-xl font-bold text-white tracking-tight mb-6">Pending Backlog Ledger Matrix</h2>
+                <h2 class="text-xl font-bold text-white tracking-tight mb-6">To-Do List</h2>
                 
                 {% if not tasks %}
                 <div class="text-center py-24 border border-dashed border-slate-800/80 rounded-2xl bg-[#0b0f19]/30">
                     <div class="text-slate-600 text-3xl mb-3">📋</div>
-                    <p class="text-slate-400 font-medium text-base">No active metrics found inside memory pool.</p>
-                    <p class="text-xs text-slate-500 mt-2 max-w-sm mx-auto px-4">Use the injection sidebar panel to process initial tasks for your workspace.</p>
+                    <p class="text-slate-400 font-medium text-base">You haven't added any tasks yet</p>
+                    <p class="text-xs text-slate-500 mt-2 max-w-sm mx-auto px-4">Use the form on the side</p>
                 </div>
                 {% else %}
                 <div class="space-y-4">

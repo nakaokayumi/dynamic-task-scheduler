@@ -52,20 +52,31 @@ def check_password(stored_hash: str, password: str) -> bool:
 
 def init_db():
     with get_db() as conn:
-        # User Profiles table
+        # 1. User Profiles table (wake_time completely removed from here)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_profile (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 age INTEGER,
                 occupation TEXT,
-                wake_time TEXT NOT NULL,
                 email TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL
             )
         ''')
 
-        # Tasks table (Strictly tied to user_id)
+        # 2. NEW: Daily Variable Wake Times table (1 entry per day of week per user)
+        # 2. NEW: Daily Variable Wake Times table (1 entry per day of week per user)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_wake_times (
+                user_id INTEGER NOT NULL,
+                day_of_week TEXT NOT NULL, -- 'Monday', 'Tuesday', etc.
+                wake_time TEXT NOT NULL DEFAULT '06:00',
+                PRIMARY KEY (user_id, day_of_week), -- Explicit composite primary key
+                FOREIGN KEY (user_id) REFERENCES user_profile (id) ON DELETE CASCADE
+            )
+        ''')
+
+        # 3. Tasks table (Strictly tied to user_id)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,7 +95,7 @@ def init_db():
             )
         ''')
 
-        # Commitments table (Strictly tied to user_id, includes travel_time)
+        # 4. Commitments table (Updated with recurrence fields: Type, Interval, and End Conditions)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS commitments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,11 +104,17 @@ def init_db():
                 start_time TEXT NOT NULL,
                 end_time TEXT NOT NULL,
                 travel_time INTEGER DEFAULT 0,
+                commitment_date TEXT NOT NULL,        -- Used as starting date for recurring events
+                recurrence_type TEXT NOT NULL DEFAULT 'none', -- 'none', 'daily', 'weekly', 'monthly', 'custom'
+                recurrence_interval INTEGER DEFAULT NULL,     -- Used if 'custom' (e.g., every X days)
+                ends_type TEXT DEFAULT 'never',               -- 'never', 'date', 'occurrences'
+                ends_date TEXT DEFAULT NULL,                  -- 'YYYY-MM-DD'
+                ends_occurrences INTEGER DEFAULT NULL,        -- Counter value
                 FOREIGN KEY(user_id) REFERENCES user_profile(id) ON DELETE CASCADE
             )
         ''')
 
-        # User Routines table (Strictly tied to user_id)
+        # 5. User Routines table (Strictly tied to user_id)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_routines (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,7 +126,7 @@ def init_db():
             )
         ''')
 
-        # User Energy Profiles table (Tied to user_id)
+        # 6. User Energy Profiles table (Tied to user_id)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_energy (
                 user_id INTEGER,
@@ -120,7 +137,7 @@ def init_db():
             )
         ''')
 
-        # 🪵 Audit Logs table (Strictly tied to user_id via Foreign Key)
+        # 7. 🪵 Audit Logs table (Strictly tied to user_id via Foreign Key)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,6 +153,7 @@ def init_db():
         conn.commit()
 
 # --- HELPER TO INITIALIZE ENERGY FOR NEW USERS ---
+
 def seed_default_energy(user_id):
     with get_db() as conn:
         # Only seed if no energy mapping exists for this user
@@ -173,16 +191,19 @@ def run_scheduling_engine(user_id):
     raw_energy = db.execute("SELECT * FROM user_energy WHERE user_id = ?", (user_id,)).fetchall()
     energy_map = {row['hour']: row['energy_level'] for row in raw_energy}
     
-    profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (user_id,)).fetchone()
-    wake_hour = 6
-    if profile and profile['wake_time']:
-        try:
-            wake_hour = int(profile['wake_time'].split(':')[0])
-        except Exception:
-            pass
+    # -----------------------------------------------------------------------
+    # 🔗 LINK STEP 3: Dynamic daily variable wake configuration extraction
+    # -----------------------------------------------------------------------
+    todays_wake = get_todays_wake_time(user_id) # Pulls string like "07:30"
+    try:
+        wake_hour = int(todays_wake.split(':')[0])
+        wake_minute = int(todays_wake.split(':')[1])
+    except (ValueError, IndexError, AttributeError):
+        wake_hour = 6
+        wake_minute = 0
         
     today = datetime.today().date()
-    current_timeline = datetime.combine(today, datetime.min.time()) + timedelta(hours=wake_hour)
+    current_timeline = datetime.combine(today, datetime.min.time()) + timedelta(hours=wake_hour, minutes=wake_minute)
     end_of_day = datetime.combine(today, datetime.min.time()) + timedelta(hours=24)
     
     if not tasks and not commitments:
@@ -211,6 +232,7 @@ def run_scheduling_engine(user_id):
     # =======================================================================
     # STEP 2: Automated Routine Injection Layer
     # =======================================================================
+    # Linked wake_hour dynamically into the calculation frame bounds
     period_bounds = {
         'morning': (wake_hour, 12),
         'afternoon': (12, 17),
@@ -339,6 +361,20 @@ def run_scheduling_engine(user_id):
 def is_authenticated():
     return "user_id" in session
 
+
+def get_todays_wake_time(user_id):
+    """Helper to fetch the specific wake time for whatever day today is."""
+    # Get today's name (e.g., 'Monday', 'Tuesday')
+    today_name = datetime.now().strftime('%A')
+    
+    db = get_db()
+    row = db.execute(
+        "SELECT wake_time FROM user_wake_times WHERE user_id = ? AND day_of_week = ?", 
+        (user_id, today_name)
+    ).fetchone()
+    
+    # Fallback to standard 06:00 if not configured yet
+    return row['wake_time'] if row else "06:00"
 # --- ROUTING PATTERNS ---
 @app.route('/')
 def index():
@@ -352,6 +388,10 @@ def index():
     if not profile:
         session.clear()
         return redirect(url_for('login'))
+        
+    # 🔗 LINK STEP 2 HERE: Convert the row to a dictionary and inject today's wake time
+    profile_dict = dict(profile)
+    profile_dict['wake_time'] = get_todays_wake_time(current_user)
         
     # Active tasks displayed on the dashboard grid (incomplete only)
     all_tasks = db.execute(
@@ -378,11 +418,11 @@ def index():
     # Run the automated scheduler timeline matrix
     timeline = run_scheduling_engine(current_user)
     
-    # ✅ Packaged completely into the response payload context
+    # ✅ Pass the updated profile_dict (instead of the old profile object) to the template
     return render_template(
         'index.html', 
         timeline=timeline, 
-        profile=profile, 
+        profile=profile_dict, 
         tasks=all_tasks, 
         completion_rate=completion_rate
     )
@@ -422,42 +462,122 @@ def manage_tasks():
     all_tasks = db.execute("SELECT * FROM tasks WHERE is_completed = 0 AND user_id = ? ORDER BY id DESC", (current_user,)).fetchall()
     return render_template('tasks.html', tasks=all_tasks)
 
+@app.route('/profile', methods=['GET', 'POST'])
+def manage_settings():
+    if not is_authenticated():
+        return redirect(url_for('login'))
+        
+    current_user = session['user_id']
+    db = get_db()
+    days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    
+    if request.method == 'POST':
+        print("--- POST REQUEST RECEIVED ---")
+        print("Form Data:", request.form)
+        # 1. Grab personal details from form
+        name = request.form.get('name')
+        age = request.form.get('age')
+        email = request.form.get('email')
+        occupation = request.form.get('occupation')
+        
+        # 2. Update the user_profile table
+        db.execute("""
+            UPDATE user_profile 
+            SET name = ?, age = ?, email = ?, occupation = ? 
+            WHERE id = ?
+        """, (name, age, email, occupation, current_user))
+        
+        # 3. Process and update weekly wake times
+        for day in days_of_week:
+            form_name = f"wake_{day.lower()}"
+            wake_time = request.form.get(form_name, '06:00')
+            
+            db.execute("""
+                INSERT INTO user_wake_times (user_id, day_of_week, wake_time)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id, day_of_week) 
+                DO UPDATE SET wake_time = excluded.wake_time
+            """, (current_user, day, wake_time))
+            
+        db.commit()
+        flash("Settings updated successfully!", "success")
+        return redirect(url_for('manage_settings'))
+
+    # --- GET REQUEST: Load existing data to display ---
+    profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (current_user,)).fetchone()
+    
+    wake_rows = db.execute(
+        "SELECT day_of_week, wake_time FROM user_wake_times WHERE user_id = ?", 
+        (current_user,)
+    ).fetchall()
+    wake_dict = {row['day_of_week']: row['wake_time'] for row in wake_rows}
+    
+    return render_template('settings.html', profile=profile, wake_dict=wake_dict)
+
+@app.route('/settings/wake-times', methods=['GET', 'POST'])
+def manage_wake_times():
+    if not is_authenticated():
+        return redirect(url_for('login'))
+        
+    current_user = session['user_id']
+    db = get_db()
+    days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    
+    if request.method == 'POST':
+        for day in days_of_week:
+            # Look for form names like 'wake_monday', 'wake_tuesday', etc.
+            form_name = f"wake_{day.lower()}"
+            wake_time = request.form.get(form_name, '06:00') # Fallback to 06:00 if missing
+            
+            # Upsert logic: Update if exists, insert if it doesn't
+            db.execute("""
+                INSERT INTO user_wake_times (user_id, day_of_week, wake_time)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id, day_of_week) 
+                DO UPDATE SET wake_time = excluded.wake_time
+            """, (current_user, day, wake_time))
+            
+        db.commit()
+        flash("Wake times updated successfully!", "success")
+        return redirect(url_for('manage_wake_times'))
+
+    # --- GET REQUEST: Fetch data to display inside the HTML form inputs ---
+    rows = db.execute(
+        "SELECT day_of_week, wake_time FROM user_wake_times WHERE user_id = ?", 
+        (current_user,)
+    ).fetchall()
+    
+    # Map database records into a clean dictionary: {'Monday': '07:00', 'Tuesday': '06:30'}
+    wake_dict = {row['day_of_week']: row['wake_time'] for row in rows}
+    
+    # Pass wake_dict directly to your template!
+    return render_template('wake_settings.html', wake_dict=wake_dict)
+
 @app.route('/calendar')
 def calendar_view():
     if not is_authenticated():
         return redirect(url_for('login'))
     return render_template('calendar.html')
 
-@app.route('/routines', methods=['GET', 'POST'])
-def manage_routines():
-    if not is_authenticated(): 
-        return redirect(url_for('login'))
-        
-    db = get_db()
-    current_user = session['user_id']
-    
-    if request.method == 'POST':
-        title = request.form['title']
-        duration = int(request.form['duration'])
-        preferred_period = request.form['preferred_period']
-        
-        db.execute(
-            "INSERT INTO user_routines (user_id, title, duration, preferred_period) VALUES (?, ?, ?, ?)",
-            (current_user, title, duration, preferred_period)
-        )
-        db.commit()
-        return redirect(url_for('manage_routines'))
-        
-    routines = db.execute("SELECT * FROM user_routines WHERE user_id = ?", (current_user,)).fetchall()
-    return render_template('routines.html', routines=routines)
 
 @app.route('/routines/delete/<int:routine_id>', methods=['POST'])
 def delete_routine(routine_id):
+    # 1. Secure authentication check
     if not is_authenticated(): 
         return redirect(url_for('login'))
-    db = get_db()
-    db.execute("DELETE FROM user_routines WHERE id = ? AND user_id = ?", (routine_id, session['user_id']))
-    db.commit()
+        
+    user_id = session.get('user_id')
+    
+    # 2. Safe context-managed database transaction
+    with get_db() as conn:
+        # Secure delete: ensure the routine strictly belongs to this specific logged-in user
+        conn.execute(
+            "DELETE FROM user_routines WHERE id = ? AND user_id = ?", 
+            (routine_id, user_id)
+        )
+        conn.commit()
+
+    flash("Routine deleted successfully!", "success")
     return redirect(url_for('manage_routines'))
 
 @app.route('/api/calendar-events')
@@ -523,8 +643,10 @@ def signup():
             
         hashed_pw = hash_password(request.form['password'])
         cursor = db.cursor()
-        cursor.execute("INSERT INTO user_profile (name, age, occupation, wake_time, email, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
-                       (request.form['name'], request.form['age'], request.form['occupation'], request.form['wake_time'], request.form['email'], hashed_pw))
+        cursor.execute(
+            "INSERT INTO user_profile (name, age, occupation, email, password_hash) VALUES (?, ?, ?, ?, ?)",
+            (request.form['name'], request.form['age'], request.form['occupation'], request.form['email'], hashed_pw)
+        )
         user_id = cursor.lastrowid
         db.commit()
         
@@ -536,6 +658,37 @@ def signup():
         
         return redirect(url_for('index'))
     return render_template('signup.html')
+
+@app.route('/routines', methods=['GET', 'POST'])
+def manage_routines():
+    # 1. Ensure user is authenticated safely
+    user_id = session.get('user_id')
+    if not user_id or not is_authenticated():
+        return redirect(url_for('login'))
+
+    db = get_db()
+
+    # 2. Handle adding a new routine via POST
+    if request.method == 'POST':
+        title = request.form.get('title')
+        duration = request.form.get('duration')
+        preferred_period = request.form.get('preferred_period')
+
+        if title and duration and preferred_period:
+            db.execute(
+                "INSERT INTO user_routines (user_id, title, duration, preferred_period) VALUES (?, ?, ?, ?)",
+                (user_id, title, int(duration), preferred_period)
+            )
+            db.commit()
+            flash("Routine added successfully!", "success")
+        return redirect(url_for('manage_routines'))
+
+    # 3. Handle viewing the page via GET (Fetches user-specific routines)
+    routines = db.execute(
+        "SELECT * FROM user_routines WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    
+    return render_template('routines.html', routines=routines)
 
 @app.route('/logout')
 def logout():
@@ -587,7 +740,6 @@ def delete_commitment(commitment_id):
     db.execute("DELETE FROM commitments WHERE id = ? AND user_id = ?", (commitment_id, session['user_id']))
     db.commit()
     return redirect(url_for('manage_commitments'))
-
 @app.route('/commitments', methods=['GET', 'POST'])
 def manage_commitments():
     if not is_authenticated(): 
@@ -598,26 +750,48 @@ def manage_commitments():
     
     if request.method == 'POST':
         title = request.form['title']
-        start_str = request.form['start_time']
-        end_str = request.form['end_time']
+        start_str = request.form['start_time']  # Usually just 'HH:MM'
+        end_str = request.form['end_time']      # Usually just 'HH:MM'
+        
+        # Pull standard travel time
         travel_time = request.form.get('travel_time', 0)
         travel_time = int(travel_time) if travel_time else 0
         
+        # New Recurrence Parameters from form inputs
+        commitment_date = request.form.get('commitment_date') # 'YYYY-MM-DD'
+        recurrence_type = request.form.get('recurrence_type', 'none')
+        recurrence_interval = request.form.get('recurrence_interval')
+        ends_type = request.form.get('ends_type', 'never')
+        ends_date = request.form.get('ends_date')
+        ends_occurrences = request.form.get('ends_occurrences')
+
+        # Clean integer strings and empty HTML form strings to None/Integer safely
+        interval_val = int(recurrence_interval) if (recurrence_interval and recurrence_type == 'custom') else None
+        occurrences_val = int(ends_occurrences) if (ends_occurrences and ends_type == 'occurrences') else None
+        if not ends_date or ends_type != 'date': 
+            ends_date = None
+
         db.execute(
             """
-            INSERT INTO commitments (user_id, title, start_time, end_time, travel_time) 
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO commitments (
+                user_id, title, start_time, end_time, travel_time, 
+                commitment_date, recurrence_type, recurrence_interval, ends_type, ends_date, ends_occurrences
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (current_user, title, start_str, end_str, travel_time)
+            (
+                current_user, title, start_str, end_str, travel_time,
+                commitment_date, recurrence_type, interval_val, ends_type, ends_date, occurrences_val
+            )
         )
         db.commit()
         return redirect(url_for('manage_commitments'))
         
     commitments = db.execute(
-        "SELECT * FROM commitments WHERE user_id = ? ORDER BY start_time ASC", (current_user,)
+        "SELECT * FROM commitments WHERE user_id = ? ORDER BY commitment_date ASC, start_time ASC", 
+        (current_user,)
     ).fetchall()
+    
     return render_template('commitments.html', commitments=commitments)
-        
 @app.route('/energy', methods=['GET', 'POST'])
 def manage_energy():
     if not is_authenticated(): return redirect(url_for('login'))

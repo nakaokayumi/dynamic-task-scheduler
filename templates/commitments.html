@@ -20,15 +20,21 @@
                                class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-base text-white outline-none focus:border-blue-500 transition shadow-inner">
                     </div>
 
+                    <div class="flex flex-col">
+                        <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Starting Date</label>
+                        <input type="date" name="commitment_date" required 
+                               class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-sm text-white color-scheme-dark outline-none focus:border-blue-500 transition">
+                    </div>
+
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div class="flex flex-col">
                             <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Start Time</label>
-                            <input type="datetime-local" name="start_time" required 
+                            <input type="time" name="start_time" required 
                                    class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-sm text-white color-scheme-dark outline-none focus:border-blue-500 transition">
                         </div>
                         <div class="flex flex-col">
                             <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">End Time</label>
-                            <input type="datetime-local" name="end_time" required 
+                            <input type="time" name="end_time" required 
                                    class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-sm text-white color-scheme-dark outline-none focus:border-blue-500 transition">
                         </div>
                     </div>
@@ -43,6 +49,50 @@
                             <option value="60">1 Hour</option>
                             <option value="90">1.5 Hours</option>
                         </select>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div class="flex flex-col">
+                            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Repeat Interval</label>
+                            <select name="recurrence_type" id="recurrence_type" onchange="toggleRecurrenceOptions()" required
+                                    class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-sm text-slate-300 outline-none focus:border-blue-500 transition shadow-inner">
+                                <option value="none">Does Not Repeat</option>
+                                <option value="daily">Repeats Daily</option>
+                                <option value="weekly">Repeats Weekly</option>
+                                <option value="monthly">Repeats Monthly</option>
+                                <option value="custom">Custom Interval</option>
+                            </select>
+                        </div>
+
+                        <div id="custom_interval_container" class="flex flex-col hidden">
+                            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Repeats Every (Days)</label>
+                            <input type="number" name="recurrence_interval" min="1" placeholder="e.g. 3 days"
+                                   class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-sm text-white outline-none focus:border-blue-500 transition shadow-inner">
+                        </div>
+                    </div>
+
+                    <div id="end_conditions_grid" class="grid grid-cols-1 gap-4">
+                        <div class="flex flex-col">
+                            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Ends</label>
+                            <select name="ends_type" id="ends_type" onchange="toggleEndOptions()" required
+                                    class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-sm text-slate-300 outline-none focus:border-blue-500 transition shadow-inner">
+                                <option value="never">Never Ends</option>
+                                <option value="date">On Specific Date</option>
+                                <option value="occurrences">After Occurrences</option>
+                            </select>
+                        </div>
+
+                        <div id="ends_date_container" class="flex flex-col hidden">
+                            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">End Date</label>
+                            <input type="date" name="ends_date"
+                                   class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-sm text-white color-scheme-dark outline-none focus:border-blue-500 transition">
+                        </div>
+
+                        <div id="ends_occurrences_container" class="flex flex-col hidden">
+                            <label class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Number of Occurrences</label>
+                            <input type="number" name="ends_occurrences" min="1" placeholder="e.g. 10 times"
+                                   class="w-full bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 text-sm text-white outline-none focus:border-blue-500 transition shadow-inner">
+                        </div>
                     </div>
 
                     <button type="submit" class="w-full bg-[#0084d1] hover:bg-[#0074b8] text-white font-bold py-4 px-4 rounded-xl tracking-wide transition duration-150 transform-gpu active:scale-[0.99] mt-4 shadow-lg shadow-blue-950/20">
@@ -74,8 +124,13 @@
                     <div class="p-4 bg-[#0b0f19] border border-slate-800/60 rounded-xl flex items-center justify-between gap-4 group">
                         <div>
                             <p class="text-base font-semibold text-white tracking-tight">{{ c['title'] }}</p>
-                            <div class="flex items-center gap-2 mt-1.5 text-xs text-slate-400">
-                                <span class="text-slate-400 font-medium">⏱️ {{ c['start_time'].replace('T', ' ') }} — {{ c['end_time'].replace('T', ' ') }}</span>
+                            <div class="flex flex-col gap-1 mt-1.5 text-xs text-slate-400">
+                                <span class="text-slate-400 font-medium">⏱️ {{ c['start_time'] }} — {{ c['end_time'] }}</span>
+                                <span class="text-slate-500">📅 Started: {{ c['commitment_date'] }} 
+                                    {% if c['recurrence_type'] != 'none' %} 
+                                        <span class="text-purple-400 font-semibold">🔁 ({{ c['recurrence_type'] | capitalize }})</span> 
+                                    {% endif %}
+                                </span>
                             </div>
                         </div>
                         <div class="flex items-center gap-3">
@@ -108,4 +163,33 @@
         color-scheme: dark;
     }
 </style>
+
+<script>
+function toggleRecurrenceOptions() {
+    const type = document.getElementById('recurrence_type').value;
+    const container = document.getElementById('custom_interval_container');
+    
+    if (type === 'custom') {
+        container.classList.remove('hidden');
+    } else {
+        container.classList.add('hidden');
+    }
+}
+
+function toggleEndOptions() {
+    const type = document.getElementById('ends_type').value;
+    const dateContainer = document.getElementById('ends_date_container');
+    const countContainer = document.getElementById('ends_occurrences_container');
+
+    // Reset visibility states
+    dateContainer.classList.add('hidden');
+    countContainer.classList.add('hidden');
+
+    if (type === 'date') {
+        dateContainer.classList.remove('hidden');
+    } else if (type === 'occurrences') {
+        countContainer.classList.remove('hidden');
+    }
+}
+</script>
 {% endblock %}

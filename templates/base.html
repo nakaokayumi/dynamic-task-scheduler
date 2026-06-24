@@ -18,6 +18,7 @@
             <div class="flex items-center justify-center flex-wrap gap-x-5 gap-y-2 text-center">
                 <a href="{{ url_for('index') }}" class="text-slate-300 hover:text-white text-sm font-medium transition tracking-tight">📊 Dashboard</a>
                 <a href="{{ url_for('manage_tasks') }}" class="text-slate-300 hover:text-white text-sm font-medium transition tracking-tight">🎯 Add Tasks</a>
+                <a href="{{ url_for('manage_routines') }}" class="text-slate-300 hover:text-white transition">Routines</a>
                 <a href="{{ url_for('manage_commitments') }}" class="text-slate-300 hover:text-white text-sm font-medium transition tracking-tight">🔒 Add Fixed Commitments</a>
                 <a href="{{ url_for('manage_energy') }}" class="text-slate-300 hover:text-white text-sm font-medium flex items-center gap-1 transition tracking-tight">⚡Energy</a>
                 <!-- Inside the nav links container in templates/base.html -->
@@ -27,7 +28,7 @@
                 
                 <span class="text-slate-800 hidden md:inline">|</span>
                 
-                <a href="{{ url_for('profile') }}" class="text-slate-300 hover:text-white text-sm font-medium flex items-center gap-1.5 transition tracking-tight">👤 Settings</a>
+                <a href="{{ url_for('manage_settings') }}" class="text-slate-300 hover:text-white text-sm font-medium flex items-center gap-1.5 transition tracking-tight">👤 Settings</a>
                 
                 <span class="text-slate-800 hidden md:inline">|</span>
                 

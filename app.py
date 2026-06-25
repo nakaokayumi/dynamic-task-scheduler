@@ -4,6 +4,8 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+def is_authenticated():
+    return 'user_id' in session
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(24))
@@ -171,7 +173,7 @@ def run_scheduling_engine(user_id):
     schedule_timeline = []
     free_slots = []
     
-    # 🛠️ ISOLATION FIX: Query tasks specific to this logged-in user
+    # 1. Query tasks specific to this logged-in user
     raw_tasks = db.execute(
         """
         SELECT id, parent_id, title, priority, urgency, difficulty, duration, preferred_period, due_date, is_completed
@@ -179,22 +181,26 @@ def run_scheduling_engine(user_id):
         WHERE is_completed = 0 AND user_id = ?
         """, (user_id,)
     ).fetchall()
-        
     tasks = [dict(t) for t in raw_tasks]
     
-    # 🛠️ ISOLATION FIX: Query commitments specific to this user
-    commitments = db.execute(
+    # 2. Query commitments specific to this user (Converted to clean dicts)
+    raw_commitments = db.execute(
         "SELECT * FROM commitments WHERE user_id = ? ORDER BY start_time ASC", (user_id,)
     ).fetchall()
+    commitments = [dict(c) for c in raw_commitments]
     
-    # 🛠️ ISOLATION FIX: Query energy maps specific to this user
+    # 3. Query standalone user routines specific to this user
+    raw_routines = db.execute(
+        "SELECT title, duration, preferred_period FROM user_routines WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    routines = [dict(r) for r in raw_routines]
+    
+    # 4. Query energy maps specific to this user
     raw_energy = db.execute("SELECT * FROM user_energy WHERE user_id = ?", (user_id,)).fetchall()
     energy_map = {row['hour']: row['energy_level'] for row in raw_energy}
     
-    # -----------------------------------------------------------------------
-    # 🔗 LINK STEP 3: Dynamic daily variable wake configuration extraction
-    # -----------------------------------------------------------------------
-    todays_wake = get_todays_wake_time(user_id) # Pulls string like "07:30"
+    # Fetch today's wake configuration bounds
+    todays_wake = get_todays_wake_time(user_id)
     try:
         wake_hour = int(todays_wake.split(':')[0])
         wake_minute = int(todays_wake.split(':')[1])
@@ -205,17 +211,57 @@ def run_scheduling_engine(user_id):
     today = datetime.today().date()
     current_timeline = datetime.combine(today, datetime.min.time()) + timedelta(hours=wake_hour, minutes=wake_minute)
     end_of_day = datetime.combine(today, datetime.min.time()) + timedelta(hours=24)
-    
-    if not tasks and not commitments:
+
+    # 🚨 TEMPORARY DEBUG LOGS
+    print(f"--- DEBUG ENGINE LOADING ---")
+    print(f"Tasks found: {len(tasks)}")
+    print(f"Commitments found: {len(commitments)}")
+    print(f"Routines found: {len(routines)}")
+
+    if not tasks and not commitments and not routines:
         return []
         
+    # Helper utility to handle variable date strings coming from database frames cleanly
+    def parse_datetime_flexible(dt_str, default_time_str="00:00"):
+        if not dt_str:
+            return None
+        if len(dt_str) == 5 and ":" in dt_str:
+            today_str = datetime.today().strftime("%Y-%m-%d")
+            return datetime.strptime(f"{today_str} {dt_str}", "%Y-%m-%d %H:%M")
+        if "T" in dt_str:
+            return datetime.strptime(dt_str, "%Y-%m-%dT%H:%M")
+        if len(dt_str) > 10:
+            return datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+        return datetime.strptime(f"{dt_str} {default_time_str}", "%Y-%m-%d %H:%M")
+
+    # =======================================================================
+    # STEP 1.5: Immediate Wake-Up Routine Placement
+    # =======================================================================
+    for r in routines[:]:
+        if r['preferred_period'].lower() == 'morning':
+            schedule_timeline.append({
+                "title": r['title'],
+                "start": current_timeline.strftime("%H:%M"),
+                "end": (current_timeline + timedelta(minutes=r['duration'])).strftime("%H:%M"),
+                "type": "routine",
+                "score": "Fixed Routine"
+            })
+            current_timeline += timedelta(minutes=r['duration'])
+            routines.remove(r)
+
+    # =======================================================================
+    # STEP 1: Map Fixed Commitment Boundaries & Remaining Free Slots
+    # =======================================================================
     for comm in commitments:
         try:
-            c_start = datetime.strptime(comm['start_time'], "%Y-%m-%dT%H:%M")
-            c_end = datetime.strptime(comm['end_time'], "%Y-%m-%dT%H:%M")
+            c_start = parse_datetime_flexible(comm['start_time'], "09:00")
+            c_end = parse_datetime_flexible(comm['end_time'], "17:00")
             
-            t_buffer = comm['travel_time'] if 'travel_time' in comm.keys() else 0
-            
+            if not c_start or not c_end:
+                continue
+                
+            # Safely check dict keys for travel time
+            t_buffer = comm.get('travel_time', 0) or 0
             arrival_buffer_start = c_start - timedelta(minutes=t_buffer)
             departure_buffer_end = c_end + timedelta(minutes=t_buffer)
 
@@ -223,53 +269,49 @@ def run_scheduling_engine(user_id):
                 free_slots.append({"start": current_timeline, "end": arrival_buffer_start})
                 
             current_timeline = max(current_timeline, departure_buffer_end)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Commitment mapping exception skipped: {e}")
 
     if current_timeline < end_of_day:
         free_slots.append({"start": current_timeline, "end": end_of_day})
         
     # =======================================================================
-    # STEP 2: Automated Routine Injection Layer
+    # STEP 2: Non-Morning Routine Allocation Layer
     # =======================================================================
-    # Linked wake_hour dynamically into the calculation frame bounds
     period_bounds = {
-        'morning': (wake_hour, 12),
         'afternoon': (12, 17),
         'evening': (17, 23)
     }
 
     adjusted_free_slots = []
-    
     for slot in free_slots:
         slot_start = slot["start"]
         slot_end = slot["end"]
         
-        for t in tasks[:]:
-            if t.get('preferred_period') and ('Routine' in t['title'] or '🧼' in t['title'] or '🍳' in t['title']):
-                start_h, end_h = period_bounds.get(t['preferred_period'], (wake_hour, 12))
-                
-                if start_h <= slot_start.hour < end_h:
-                    slot_capacity = int((slot_end - slot_start).total_seconds() / 60)
+        for r in routines[:]:
+            start_h, end_h = period_bounds.get(r['preferred_period'].lower(), (12, 17))
+            if start_h <= slot_start.hour < end_h:
+                slot_capacity = int((slot_end - slot_start).total_seconds() / 60)
+                if slot_capacity >= r['duration']:
+                    schedule_timeline.append({
+                        "title": r['title'],
+                        "start": slot_start.strftime("%H:%M"),
+                        "end": (slot_start + timedelta(minutes=r['duration'])).strftime("%H:%M"),
+                        "type": "routine",
+                        "score": "Fixed Routine"
+                    })
+                    slot_start += timedelta(minutes=r['duration'])
+                    routines.remove(r)
                     
-                    if slot_capacity >= t['duration']:
-                        schedule_timeline.append({
-                            "title": t['title'],
-                            "start": slot_start.strftime("%H:%M"),
-                            "end": (slot_start + timedelta(minutes=t['duration'])).strftime("%H:%M"),
-                            "type": "routine",
-                            "score": "Fixed Routine"
-                        })
-                        slot_start += timedelta(minutes=t['duration'])
-                        tasks.remove(t)
-                        
         if slot_start < slot_end:
             adjusted_free_slots.append({"start": slot_start, "end": slot_end})
             
     free_slots = adjusted_free_slots
 
+    # =======================================================================
+    # STEP 3: Scored Fluid Task Allocation Matrix Layer
+    # =======================================================================
     MIN_CHUNK = 30
-        
     for slot in free_slots:
         slot_start = slot["start"]
         slot_end = slot["end"]
@@ -284,7 +326,7 @@ def run_scheduling_engine(user_id):
                 days_left = 7
                 if t['due_date']:
                     try:
-                        due_dt = datetime.strptime(t['due_date'], "%Y-%m-%d").date()
+                        due_dt = datetime.strptime(t['due_date'].split()[0], "%Y-%m-%d").date()
                         days_left = (due_dt - today).days
                     except Exception:
                         pass
@@ -340,27 +382,36 @@ def run_scheduling_engine(user_id):
                 winner['duration'] -= allocated
                 winner['title'] = f"{winner['title']} (Part 2)"
                 slot_capacity = 0
-                
+
+    # =======================================================================
+    # STEP 4: Fixed Commitments Assembly Layer
+    # =======================================================================
     for comm in commitments:
         try:
-            c_start = datetime.strptime(comm['start_time'], "%Y-%m-%dT%H:%M")
-            c_end = datetime.strptime(comm['end_time'], "%Y-%m-%dT%H:%M")
-            schedule_timeline.append({
-                "title": comm['title'],
-                "start": c_start.strftime("%H:%M"),
-                "end": c_end.strftime("%H:%M"),
-                "type": "commitment",
-                "score": "N/A"
-            })
-        except Exception:
-            pass
-        
+            c_start = parse_datetime_flexible(comm['start_time'], "09:00")
+            c_end = parse_datetime_flexible(comm['end_time'], "17:00")
+            if c_start and c_end:
+                t_buffer = comm.get('travel_time', 0) or 0
+                visual_start = c_start - timedelta(minutes=t_buffer)
+                visual_end = c_end + timedelta(minutes=t_buffer)
+                
+                display_title = comm['title']
+                if t_buffer > 0:
+                    display_title += f" (Inc. {t_buffer}m Travel Time)"
+
+                schedule_timeline.append({
+                    "title": display_title,
+                    "start": visual_start.strftime("%H:%M"),
+                    "end": visual_end.strftime("%H:%M"),
+                    "type": "commitment",
+                    "score": "N/A"
+                })
+        except Exception as e:
+            print(f"Error drawing commitment to timeline array: {e}")
+            
+    # Sort everything chronologically across all layers
     schedule_timeline.sort(key=lambda x: x['start'])
     return schedule_timeline
-
-def is_authenticated():
-    return "user_id" in session
-
 
 def get_todays_wake_time(user_id):
     """Helper to fetch the specific wake time for whatever day today is."""
@@ -378,11 +429,14 @@ def get_todays_wake_time(user_id):
 # --- ROUTING PATTERNS ---
 @app.route('/')
 def index():
-    if not is_authenticated():
+    # 🌟 REPLACE THE NAMERROR LINE WITH THIS DIRECT SESSION CHECK:
+    if 'user_id' not in session:
         return redirect(url_for('login'))
+    
         
     db = get_db()
     current_user = session['user_id']
+    # ... rest of your index code remains exactly the same
     
     profile = db.execute("SELECT * FROM user_profile WHERE id = ?", (current_user,)).fetchone()
     if not profile:

@@ -53,8 +53,16 @@
         <div class="relative border-l-2 border-slate-800 ml-4 space-y-6">
             {% for item in timeline %}
             <div class="relative pl-8">
-                <span class="absolute left-[-9px] top-1.5 w-4 h-4 rounded-full border-2 {{ 'bg-amber-500 border-amber-900' if item.type == 'commitment' else 'bg-sky-500 border-sky-900' }}"></span>
-                <div class="p-4 rounded-xl border {{ 'bg-amber-950/20 border-amber-800/60' if item.type == 'commitment' else 'bg-slate-900 border-slate-800' }} flex justify-between items-center shadow-md">
+    <span class="absolute left-[-9px] top-1.5 w-4 h-4 rounded-full border-2 
+        {% if item.type == 'commitment' %} bg-amber-500 border-amber-900 
+        {% elif item.type == 'routine' %} bg-emerald-500 border-emerald-900 
+        {% else %} bg-sky-500 border-sky-900 {% endif %}">
+    </span>
+    
+    <div class="p-4 rounded-xl border flex justify-between items-center shadow-md
+        {% if item.type == 'commitment' %} bg-amber-950/20 border-amber-800/60 
+        {% elif item.type == 'routine' %} bg-emerald-950/20 border-emerald-800/60 
+        {% else %} bg-slate-900 border-slate-800 {% endif %}">
                     <div>
                         <span class="text-xs font-mono {{ 'text-amber-400' if item.type == 'commitment' else 'text-sky-400' }} font-bold">[{{ item.start }} - {{ item.end }}]</span>
                         <h3 class="text-md font-semibold text-white mt-1">{{ item.title }}</h3>
